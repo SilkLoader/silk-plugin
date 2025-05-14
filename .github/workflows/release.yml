@@ -104,7 +104,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tag_name: ${{ steps.read_version.outputs.version_tag }}
-          release_name: Release ${{ steps.read_version.outputs.version_tag }}
+          release_name: Release ${{ steps.read_version.outputs.release_version }}
           body: ${{ steps.generate_changelog.outputs.changelog }}
           draft: false
           prerelease: ${{ github.event.inputs.is_prerelease }}
@@ -115,6 +115,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./plugin/build/libs/plugin.jar #
-          asset_name: plugin-${{ steps.read_version.outputs.version_tag }}.jar
+          asset_path: ./build/libs/silk-plugin-${{ steps.read_version.outputs.release_version }}.jar
+          asset_name: silk-plugin-${{ steps.read_version.outputs.release_version }}.jar
           asset_content_type: application/java-archive
