@@ -59,7 +59,8 @@ public class SilkPlugin implements Plugin<Project> {
 
         SilkExtension extension = project.getExtensions().create(
                 "silk",
-                SilkExtension.class
+                SilkExtension.class,
+                project
         );
         extension.initializeGameJarProvider(equilinoxConfiguration, project);
         extension.getRunDir().convention(project.getLayout().getProjectDirectory().dir("run"));
