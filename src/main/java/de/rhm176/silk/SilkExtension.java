@@ -4,6 +4,7 @@ import org.gradle.api.GradleException;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.file.DirectoryProperty;
+import org.gradle.api.file.FileCollection;
 import org.gradle.api.file.RegularFile;
 import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.provider.Provider;
@@ -16,7 +17,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -132,10 +132,10 @@ public abstract class SilkExtension {
      * }
      * </pre>
      *
-     * @return A {@link File} object pointing to the Equilinox game JAR.
+     * @return A {@link FileCollection} object pointing to the Equilinox game JAR.
      * @throws GradleException if the game JAR cannot be found after searching known locations.
      */
-    public File findEquilinoxGameJar() {
+    public FileCollection findEquilinoxGameJar() {
         String os = System.getProperty("os.name").toLowerCase();
         List<String> potentialJarNames = new ArrayList<>();
 
@@ -161,23 +161,8 @@ public abstract class SilkExtension {
                 for (String jarName : potentialJarNames) {
                     Path gameJarPath = equilinoxGameDir.resolve(jarName);
                     if (Files.isRegularFile(gameJarPath)) {
-                        return gameJarPath.toFile();
-                    }
-
-                    if (os.contains("mac")) {
-                        Path appBundlePath = equilinoxGameDir.resolve("Equilinox.app");
-                        if(Files.isDirectory(appBundlePath)) {
-                            List<Path> macJarPaths = Arrays.asList(
-                                    appBundlePath.resolve("Contents/Java/Equilinox.jar"),
-                                    appBundlePath.resolve("Contents/Resources/Java/Equilinox.jar"),
-                                    appBundlePath.resolve("Contents/MacOS/Equilinox.jar")
-                            );
-                            for (Path macJarPath : macJarPaths) {
-                                if (Files.isRegularFile(macJarPath)) {
-                                    return macJarPath.toFile();
-                                }
-                            }
-                        }
+                        project.getLogger().info("Silk Plugin: Using {} as Equilinox jar.", gameJarPath);
+                        return project.files(gameJarPath);
                     }
                 }
             }

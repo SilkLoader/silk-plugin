@@ -108,9 +108,8 @@ public class SilkPlugin implements Plugin<Project> {
                 }
 
                 final int finalJavaVersion = targetJavaVersion;
-                task.getJavaLauncher().set(javaToolchains.launcherFor(spec -> {
-                    spec.getLanguageVersion().set(JavaLanguageVersion.of(finalJavaVersion));
-                }));
+                task.getJavaLauncher().set(javaToolchains.launcherFor(spec ->
+                        spec.getLanguageVersion().set(JavaLanguageVersion.of(finalJavaVersion))));
             } else {
                 project.getLogger().warn(
                         "runGame task: JavaToolchainService not found. " +
