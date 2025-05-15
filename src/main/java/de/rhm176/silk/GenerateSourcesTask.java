@@ -1,5 +1,32 @@
+/*
+ * Copyright (c) 2025 Silk Loader
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
 package de.rhm176.silk;
 
+import java.io.File;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+import javax.inject.Inject;
 import org.gradle.api.AntBuilder;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.GradleException;
@@ -10,13 +37,6 @@ import org.gradle.api.provider.ListProperty;
 import org.gradle.api.tasks.*;
 import org.gradle.process.ExecOperations;
 import org.jetbrains.annotations.NotNull;
-
-import javax.inject.Inject;
-import java.io.File;
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
 
 /**
  * A Gradle task that decompiles a given game JAR using the Vineflower decompiler
@@ -111,29 +131,34 @@ public abstract class GenerateSourcesTask extends DefaultTask {
             project.delete(tempDecompiledDir);
         }
         if (!tempDecompiledDir.mkdirs()) {
-            throw new GradleException("Could not create temporary directory for decompiled sources: " + tempDecompiledDir.getAbsolutePath());
+            throw new GradleException("Could not create temporary directory for decompiled sources: "
+                    + tempDecompiledDir.getAbsolutePath());
         }
 
         project.getLogger().lifecycle("Silk Plugin: Decompiling {} using Vineflower...", gameJarFile.getName());
 
-        List<String> vineflowerArgs = constructVineflowerArgs(gameJarFile, tempDecompiledDir, getVineflowerArgs().get());
+        List<String> vineflowerArgs = constructVineflowerArgs(
+                gameJarFile, tempDecompiledDir, getVineflowerArgs().get());
 
         try {
-            execOperations.javaexec(spec -> {
-                spec.setClasspath(getVineflowerClasspath());
-                spec.getMainClass().set("org.jetbrains.java.decompiler.main.decompiler.ConsoleDecompiler");
-                spec.setArgs(vineflowerArgs);
-                spec.setErrorOutput(System.err);
-                spec.setStandardOutput(System.out);
-            }).assertNormalExitValue();
+            execOperations
+                    .javaexec(spec -> {
+                        spec.setClasspath(getVineflowerClasspath());
+                        spec.getMainClass().set("org.jetbrains.java.decompiler.main.decompiler.ConsoleDecompiler");
+                        spec.setArgs(vineflowerArgs);
+                        spec.setErrorOutput(System.err);
+                        spec.setStandardOutput(System.out);
+                    })
+                    .assertNormalExitValue();
         } catch (Exception e) {
-            project.getLogger().error("Silk Plugin: Vineflower decompilation failed. See output above for details. " +
-                    "You might need to adjust Vineflower options or check its version compatibility.");
+            project.getLogger()
+                    .error("Silk Plugin: Vineflower decompilation failed. See output above for details. "
+                            + "You might need to adjust Vineflower options or check its version compatibility.");
             throw new GradleException("Vineflower decompilation failed for " + gameJarFile.getName(), e);
         }
 
-
-        project.getLogger().lifecycle("Silk Plugin: Decompilation complete. Jarring sources to {}...", sourcesJarFile.getName());
+        project.getLogger()
+                .lifecycle("Silk Plugin: Decompilation complete. Jarring sources to {}...", sourcesJarFile.getName());
 
         if (sourcesJarFile.exists()) {
             project.delete(sourcesJarFile);
@@ -143,13 +168,15 @@ public abstract class GenerateSourcesTask extends DefaultTask {
         }
 
         AntBuilder ant = project.getAnt();
-        ant.invokeMethod("jar", new Object[]{Map.of(
-                "destfile", sourcesJarFile.getAbsolutePath(),
-                "basedir", tempDecompiledDir.getAbsolutePath(),
-                "compress", Boolean.TRUE
-        )});
+        ant.invokeMethod("jar", new Object[] {
+            Map.of(
+                    "destfile", sourcesJarFile.getAbsolutePath(),
+                    "basedir", tempDecompiledDir.getAbsolutePath(),
+                    "compress", Boolean.TRUE)
+        });
 
-        project.getLogger().lifecycle("Silk Plugin: Successfully generated sources: {}", sourcesJarFile.getAbsolutePath());
+        project.getLogger()
+                .lifecycle("Silk Plugin: Successfully generated sources: {}", sourcesJarFile.getAbsolutePath());
     }
 
     /**
@@ -182,22 +209,23 @@ public abstract class GenerateSourcesTask extends DefaultTask {
      * @param userProvidedArgs A list of arguments provided by the user via the {@link #getVineflowerArgs()} property.
      * @return A {@link NotNull} list of strings representing the complete arguments for Vineflower.
      */
-    private static @NotNull List<String> constructVineflowerArgs(File gameJarFile, File tempDecompiledDir, List<String> userProvidedArgs) {
+    private static @NotNull List<String> constructVineflowerArgs(
+            File gameJarFile, File tempDecompiledDir, List<String> userProvidedArgs) {
         Map<String, String> mergedArgs = new LinkedHashMap<>();
 
         List<String> defaultArgs = new ArrayList<>();
-        defaultArgs.add("-dgs=1");        // Decompile Generic Signatures
-        defaultArgs.add("-hdc=0");        // Hide empty super invocation
-        defaultArgs.add("-rbr=0");        // Remove Bridge Methods
-        defaultArgs.add("-asc=1");        // Encode non-ASCII characters
-        defaultArgs.add("-hes=0");        // Hide empty static initializers
-        defaultArgs.add("-din=1");        // Decompile inner classes
-        defaultArgs.add("-dc4=1");        // Decompile Class References
-        defaultArgs.add("-uto=1");        // Use LVT Names for parameters if available
-        defaultArgs.add("-udv=1");        // Use LVT Names for local variables if available
-        defaultArgs.add("-ump=1");        // Use mixed case parameter names
-        defaultArgs.add("-vac=1");        // Verify anonymous classes
-        defaultArgs.add("-log=WARN");     // Set default log level
+        defaultArgs.add("-dgs=1"); // Decompile Generic Signatures
+        defaultArgs.add("-hdc=0"); // Hide empty super invocation
+        defaultArgs.add("-rbr=0"); // Remove Bridge Methods
+        defaultArgs.add("-asc=1"); // Encode non-ASCII characters
+        defaultArgs.add("-hes=0"); // Hide empty static initializers
+        defaultArgs.add("-din=1"); // Decompile inner classes
+        defaultArgs.add("-dc4=1"); // Decompile Class References
+        defaultArgs.add("-uto=1"); // Use LVT Names for parameters if available
+        defaultArgs.add("-udv=1"); // Use LVT Names for local variables if available
+        defaultArgs.add("-ump=1"); // Use mixed case parameter names
+        defaultArgs.add("-vac=1"); // Verify anonymous classes
+        defaultArgs.add("-log=WARN"); // Set default log level
 
         for (String arg : defaultArgs) {
             mergedArgs.put(getArgKey(arg), arg);

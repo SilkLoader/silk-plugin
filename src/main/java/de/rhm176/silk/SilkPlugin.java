@@ -99,10 +99,11 @@ public class SilkPlugin implements Plugin<Project> {
             config.setCanBeResolved(true);
             config.setTransitive(true);
 
-            Provider<Dependency> vineflowerDependency = extension.getVineflower().getVersion().map(
-                    versionString ->
-                            project.getDependencies().create("org.vineflower:vineflower:" + versionString)
-            );
+            Provider<Dependency> vineflowerDependency = extension
+                    .getVineflower()
+                    .getVersion()
+                    .map(versionString ->
+                            project.getDependencies().create("org.vineflower:vineflower:" + versionString));
             config.getDependencies().addLater(vineflowerDependency);
         });
 
@@ -115,15 +116,12 @@ public class SilkPlugin implements Plugin<Project> {
             task.getVineflowerArgs().set(extension.getVineflower().getArgs());
 
             Provider<RegularFile> gameJarProvider = extension.getGameJar();
-            task.getOutputSourcesJar().set(
-                    gameJarProvider.flatMap(jar ->
-                            project.getLayout().getBuildDirectory().file(
-                                    "silk-sources/" + jar.getAsFile().getName().replace(".jar", "") + "-sources.jar"
-                            )
-                    )
-            );
+            task.getOutputSourcesJar().set(gameJarProvider.flatMap(jar -> project.getLayout()
+                    .getBuildDirectory()
+                    .file("silk-sources/" + jar.getAsFile().getName().replace(".jar", "") + "-sources.jar")));
 
-            task.getInputs().file(gameJarProvider)
+            task.getInputs()
+                    .file(gameJarProvider)
                     .withPathSensitivity(PathSensitivity.NAME_ONLY)
                     .optional(false);
         });
