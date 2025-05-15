@@ -1,40 +1,62 @@
 plugins {
     id("java")
+    id("java-gradle-plugin")
+    id("maven-publish")
     id("com.diffplug.spotless") version "7.0.3"
 }
 
-allprojects {
-    apply(plugin = "java")
-    apply(plugin = "com.diffplug.spotless")
+version = findProperty("version")!!
+group = "de.rhm176.silk"
 
-    repositories {
-        mavenCentral()
+gradlePlugin {
+    plugins {
+        create("silkPlugin") {
+            id = "de.rhm176.silk"
+            implementationClass = "de.rhm176.silk.SilkPlugin"
+        }
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compileOnly("org.jetbrains:annotations:${rootProject.findProperty("annotationsVersion")}")
+}
+
+java {
+    withSourcesJar()
+    withJavadocJar()
+
+    val javaLanguageVersion = JavaLanguageVersion.of(rootProject.findProperty("javaVersion").toString())
+    val javaVersion = JavaVersion.toVersion(javaLanguageVersion.asInt())
+
+    toolchain {
+        languageVersion = javaLanguageVersion
     }
 
-    dependencies {
-        compileOnly("org.jetbrains:annotations:${rootProject.findProperty("annotationsVersion")}")
-    }
+    sourceCompatibility = javaVersion
+    targetCompatibility = javaVersion
+}
 
+publishing {
+    publications {
+        create<MavenPublication>("maven") {
+            from(components["java"])
+
+            artifactId = "silk-plugin"
+        }
+    }
+}
+
+spotless {
     java {
-        val javaLanguageVersion = JavaLanguageVersion.of(rootProject.findProperty("javaVersion").toString())
-        val javaVersion = JavaVersion.toVersion(javaLanguageVersion.asInt())
+        licenseHeaderFile(rootProject.file("HEADER"))
 
-        toolchain {
-            languageVersion = javaLanguageVersion
-        }
+        importOrder()
+        removeUnusedImports()
 
-        sourceCompatibility = javaVersion
-        targetCompatibility = javaVersion
-    }
-
-    spotless {
-        java {
-            licenseHeaderFile(rootProject.file("HEADER"))
-
-            importOrder()
-            removeUnusedImports()
-
-            palantirJavaFormat("2.66.0")
-        }
+        palantirJavaFormat("2.66.0")
     }
 }

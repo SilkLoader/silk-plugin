@@ -72,7 +72,8 @@ public abstract class SilkExtension {
     private FileCollection cachedEquilinoxGameJarFc = null;
 
     /**
-     * @param objectFactory Gradle's {@link ObjectFactory} for creating domain objects.
+     * @param objectFactory The Gradle {@link ObjectFactory} service, used for creating domain objects.
+     * @param project The Gradle {@link Project} this extension is associated with.
      */
     @Inject
     public SilkExtension(ObjectFactory objectFactory, Project project) {
@@ -142,7 +143,7 @@ public abstract class SilkExtension {
      * silk {
      *     vineflower {
      *         version = "1.9.3"
-     *         args << "-myarg=value"
+     *         args &lt;&lt; "-myarg=value"
      *     }
      * }
      * </pre>
