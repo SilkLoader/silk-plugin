@@ -61,6 +61,13 @@ public abstract class SilkExtension {
     private final Project project;
 
     /**
+     * Cached result of the Equilinox game JAR search.
+     * This helps to avoid repeated file system searches within the same Gradle build.
+     * Now stores a FileCollection.
+     */
+    private FileCollection cachedEquilinoxGameJarFc = null;
+
+    /**
      * @param objectFactory Gradle's {@link ObjectFactory} for creating domain objects.
      */
     @Inject
@@ -156,6 +163,15 @@ public abstract class SilkExtension {
      * @throws GradleException if the game JAR cannot be found after searching known locations.
      */
     public FileCollection findEquilinoxGameJar() {
+        if (this.cachedEquilinoxGameJarFc != null) {
+            if (!this.cachedEquilinoxGameJarFc.isEmpty()
+                    && this.cachedEquilinoxGameJarFc.getSingleFile().exists()) {
+                return this.cachedEquilinoxGameJarFc;
+            } else {
+                this.cachedEquilinoxGameJarFc = null;
+            }
+        }
+
         String os = System.getProperty("os.name").toLowerCase();
         List<String> potentialJarNames = new ArrayList<>();
 
@@ -183,10 +199,15 @@ public abstract class SilkExtension {
                     Path gameJarPath = equilinoxGameDir.resolve(jarName);
                     if (Files.isRegularFile(gameJarPath)) {
                         project.getLogger().info("Silk Plugin: Using {} as Equilinox jar.", gameJarPath);
-                        return project.files(gameJarPath);
+                        this.cachedEquilinoxGameJarFc = project.files(gameJarPath.toFile());
+                        break;
                     }
                 }
             }
+        }
+
+        if (this.cachedEquilinoxGameJarFc != null) {
+            return this.cachedEquilinoxGameJarFc;
         }
 
         project.getLogger().error("Silk: Equilinox game JAR could not be found automatically.");

@@ -59,6 +59,7 @@ public class SilkPlugin implements Plugin<Project> {
     private static final String FABRIC_MAVEN_URL = "https://maven.fabricmc.net/";
     private static final String MAVEN_CENTRAL_URL1 = "https://repo.maven.apache.org/maven2";
     private static final String MAVEN_CENTRAL_URL2 = "https://repo1.maven.org/maven2";
+    private static final String JITPACK_MAVEN_URL = "https://jitpack.io";
 
     /**
      * Applies the Silk plugin to the given Gradle project.
@@ -67,6 +68,8 @@ public class SilkPlugin implements Plugin<Project> {
      */
     @Override
     public void apply(@NotNull Project project) {
+        project.getPluginManager().apply("java");
+
         conditionallyAddRepositories(project);
 
         Configuration equilinoxConfiguration = project.getConfigurations().create("equilinox", config -> {
@@ -188,6 +191,7 @@ public class SilkPlugin implements Plugin<Project> {
     private void conditionallyAddRepositories(Project project) {
         boolean mavenCentralExists = false;
         boolean fabricMavenExists = false;
+        boolean jitpackMavenExists = false;
 
         for (ArtifactRepository repo : project.getRepositories()) {
             if (repo instanceof MavenArtifactRepository) {
@@ -199,17 +203,27 @@ public class SilkPlugin implements Plugin<Project> {
                 if (MAVEN_CENTRAL_URL1.equals(repoUrl) || MAVEN_CENTRAL_URL2.equals(repoUrl)) {
                     mavenCentralExists = true;
                 }
+                if (JITPACK_MAVEN_URL.equals(repoUrl)) {
+                    mavenCentralExists = true;
+                }
                 if (FABRIC_MAVEN_URL.regionMatches(true, 0, repoUrl, 0, FABRIC_MAVEN_URL.length() - 1)) {
                     fabricMavenExists = true;
                 }
             }
-            if (mavenCentralExists && fabricMavenExists) {
+            if (mavenCentralExists && fabricMavenExists && jitpackMavenExists) {
                 break;
             }
         }
 
         if (!mavenCentralExists) {
             project.getRepositories().mavenCentral();
+        }
+
+        if (!jitpackMavenExists) {
+            project.getRepositories().maven(repo -> {
+                repo.setUrl(URI.create(JITPACK_MAVEN_URL));
+                repo.setName("JitPack");
+            });
         }
 
         if (!fabricMavenExists) {
