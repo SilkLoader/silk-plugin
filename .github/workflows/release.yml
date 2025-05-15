@@ -60,7 +60,7 @@ jobs:
 
       - name: Build plugin
         id: build_plugin
-        run: ./gradlew :plugin:jar --stacktrace --warning-mode fail
+        run: ./gradlew :jar --stacktrace --warning-mode fail
 
       - name: Generate Changelog
         id: generate_changelog
@@ -124,6 +124,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           upload_url: ${{ steps.create_release.outputs.upload_url }}
-          asset_path: ./plugin/build/libs/plugin.jar
+          asset_path: ./build/libs/silk-plugin-${{ steps.read_version.outputs.release_version }}.jar
           asset_name: silk-plugin-${{ steps.read_version.outputs.release_version }}.jar
           asset_content_type: application/java-archive
