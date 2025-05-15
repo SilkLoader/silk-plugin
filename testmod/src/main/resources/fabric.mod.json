@@ -1,0 +1,18 @@
+{
+  "schemaVersion": 1,
+  "id": "testmod",
+  "version": "1.0.0",
+  "environment": "*",
+  "entrypoints": {
+    "main": [
+      "de.rhm176.TestModMain"
+    ]
+  },
+  "mixins": [
+    "test.mixins.json"
+  ],
+  "depends": {
+    "fabricloader": "*",
+    "java": ">=17"
+  }
+}
