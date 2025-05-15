@@ -1,62 +1,40 @@
 plugins {
-    id("java-gradle-plugin")
-    id("maven-publish")
     id("java")
     id("com.diffplug.spotless") version "7.0.3"
 }
 
-version = findProperty("version")!!
-group = "de.rhm176.silk"
+allprojects {
+    apply(plugin = "java")
+    apply(plugin = "com.diffplug.spotless")
 
-repositories {
-    mavenCentral()
-}
-
-dependencies {
-    compileOnly("org.jetbrains:annotations:${rootProject.findProperty("annotationsVersion")}")
-}
-
-gradlePlugin {
-    plugins {
-        create("silkPlugin") {
-            id = "de.rhm176.silk"
-            implementationClass = "de.rhm176.silk.SilkPlugin"
-        }
-    }
-}
-
-java {
-    withSourcesJar()
-    withJavadocJar()
-
-    val javaLanguageVersion = JavaLanguageVersion.of(rootProject.findProperty("javaVersion").toString())
-    val javaVersion = JavaVersion.toVersion(javaLanguageVersion.asInt())
-
-    toolchain {
-        languageVersion = javaLanguageVersion
+    repositories {
+        mavenCentral()
     }
 
-    sourceCompatibility = javaVersion
-    targetCompatibility = javaVersion
-}
-
-publishing {
-    publications {
-        create<MavenPublication>("maven") {
-            from(components["java"])
-
-            artifactId = "silk-plugin"
-        }
+    dependencies {
+        compileOnly("org.jetbrains:annotations:${rootProject.findProperty("annotationsVersion")}")
     }
-}
 
-spotless {
     java {
-        licenseHeaderFile(file("HEADER"))
+        val javaLanguageVersion = JavaLanguageVersion.of(rootProject.findProperty("javaVersion").toString())
+        val javaVersion = JavaVersion.toVersion(javaLanguageVersion.asInt())
 
-        importOrder()
-        removeUnusedImports()
+        toolchain {
+            languageVersion = javaLanguageVersion
+        }
 
-        palantirJavaFormat("2.66.0")
+        sourceCompatibility = javaVersion
+        targetCompatibility = javaVersion
+    }
+
+    spotless {
+        java {
+            licenseHeaderFile(rootProject.file("HEADER"))
+
+            importOrder()
+            removeUnusedImports()
+
+            palantirJavaFormat("2.66.0")
+        }
     }
 }

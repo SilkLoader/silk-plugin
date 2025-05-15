@@ -60,7 +60,7 @@ jobs:
 
       - name: Build plugin
         id: build_plugin
-        run: ./gradlew jar --stacktrace --warning-mode fail
+        run: ./gradlew :plugin:jar --stacktrace --warning-mode fail
 
       - name: Generate Changelog
         id: generate_changelog

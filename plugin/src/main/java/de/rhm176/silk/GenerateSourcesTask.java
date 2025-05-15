@@ -1,0 +1,221 @@
+package de.rhm176.silk;
+
+import org.gradle.api.AntBuilder;
+import org.gradle.api.DefaultTask;
+import org.gradle.api.GradleException;
+import org.gradle.api.Project;
+import org.gradle.api.file.ConfigurableFileCollection;
+import org.gradle.api.file.RegularFileProperty;
+import org.gradle.api.provider.ListProperty;
+import org.gradle.api.tasks.*;
+import org.gradle.process.ExecOperations;
+import org.jetbrains.annotations.NotNull;
+
+import javax.inject.Inject;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
+
+/**
+ * A Gradle task that decompiles a given game JAR using the Vineflower decompiler
+ * and packages the resulting source files into a sources JAR.
+ * <p>
+ * This task is typically configured by the {@link SilkPlugin} and uses
+ * properties defined in the {@link SilkExtension}.
+ */
+public abstract class GenerateSourcesTask extends DefaultTask {
+    private final ExecOperations execOperations;
+
+    /**
+     * The input game JAR file to be decompiled.
+     * This property must be set before the task executes.
+     *
+     * @return A {@link RegularFileProperty} representing the input JAR.
+     */
+    @InputFile
+    public abstract RegularFileProperty getInputJar();
+
+    /**
+     * The output JAR file where the decompiled sources will be stored.
+     * This property must be set before the task executes.
+     *
+     * @return A {@link RegularFileProperty} representing the output sources JAR.
+     */
+    @OutputFile
+    public abstract RegularFileProperty getOutputSourcesJar();
+
+    /**
+     * The classpath containing the Vineflower decompiler and its dependencies.
+     * This property must be configured with the Vineflower JAR.
+     *
+     * @return A {@link ConfigurableFileCollection} for the Vineflower classpath.
+     */
+    @InputFiles
+    @Classpath
+    public abstract ConfigurableFileCollection getVineflowerClasspath();
+
+    /**
+     * A list of user-supplied arguments to be passed to the Vineflower decompiler.
+     * <p>
+     * These arguments are added to a set of default arguments defined within the
+     * {@link #constructVineflowerArgs(File, File, List)} method before being
+     * passed to Vineflower. The final command will also include the input JAR path
+     * and output directory path.
+     * <p>
+     * This property is typically configured by the {@link SilkPlugin} based on
+     * settings in the {@code silk.vineflower.args} block of the build script.
+     *
+     * @return A {@link ListProperty} for user-supplied Vineflower arguments.
+     */
+    @Input
+    public abstract ListProperty<String> getVineflowerArgs();
+
+    /**
+     * Constructs a new GenerateSourcesTask.
+     * Gradle's dependency injection mechanism provides the {@link ExecOperations} service.
+     *
+     * @param execOperations Service for executing external processes, used here to run Vineflower.
+     */
+    @Inject
+    public GenerateSourcesTask(ExecOperations execOperations) {
+        this.execOperations = execOperations;
+    }
+
+    /**
+     * The main action of the task. It performs the following steps:
+     * <ol>
+     * <li>Validates the existence of the input game JAR.</li>
+     * <li>Creates a temporary directory for decompiled source files.</li>
+     * <li>Executes the Vineflower decompiler as a Java process.</li>
+     * <li>Archives the decompiled sources from the temporary directory into the output sources JAR.</li>
+     * <li>Cleans up the temporary directory.</li>
+     * </ol>
+     *
+     * @throws GradleException if the input JAR does not exist, if temporary directories cannot be created,
+     * or if Vineflower decompilation fails.
+     */
+    @TaskAction
+    public void generateSources() {
+        Project project = getProject();
+        File gameJarFile = getInputJar().get().getAsFile();
+        File sourcesJarFile = getOutputSourcesJar().get().getAsFile();
+
+        if (!gameJarFile.exists()) {
+            throw new GradleException("Input gameJar does not exist: " + gameJarFile.getAbsolutePath());
+        }
+
+        File tempDecompiledDir = new File(getTemporaryDir(), "decompiled-sources");
+        if (tempDecompiledDir.exists()) {
+            project.delete(tempDecompiledDir);
+        }
+        if (!tempDecompiledDir.mkdirs()) {
+            throw new GradleException("Could not create temporary directory for decompiled sources: " + tempDecompiledDir.getAbsolutePath());
+        }
+
+        project.getLogger().lifecycle("Silk Plugin: Decompiling {} using Vineflower...", gameJarFile.getName());
+
+        List<String> vineflowerArgs = constructVineflowerArgs(gameJarFile, tempDecompiledDir, getVineflowerArgs().get());
+
+        try {
+            execOperations.javaexec(spec -> {
+                spec.setClasspath(getVineflowerClasspath());
+                spec.getMainClass().set("org.jetbrains.java.decompiler.main.decompiler.ConsoleDecompiler");
+                spec.setArgs(vineflowerArgs);
+                spec.setErrorOutput(System.err);
+                spec.setStandardOutput(System.out);
+            }).assertNormalExitValue();
+        } catch (Exception e) {
+            project.getLogger().error("Silk Plugin: Vineflower decompilation failed. See output above for details. " +
+                    "You might need to adjust Vineflower options or check its version compatibility.");
+            throw new GradleException("Vineflower decompilation failed for " + gameJarFile.getName(), e);
+        }
+
+
+        project.getLogger().lifecycle("Silk Plugin: Decompilation complete. Jarring sources to {}...", sourcesJarFile.getName());
+
+        if (sourcesJarFile.exists()) {
+            project.delete(sourcesJarFile);
+        }
+        if (sourcesJarFile.getParentFile() != null) {
+            sourcesJarFile.getParentFile().mkdirs();
+        }
+
+        AntBuilder ant = project.getAnt();
+        ant.invokeMethod("jar", new Object[]{Map.of(
+                "destfile", sourcesJarFile.getAbsolutePath(),
+                "basedir", tempDecompiledDir.getAbsolutePath(),
+                "compress", Boolean.TRUE
+        )});
+
+        project.getLogger().lifecycle("Silk Plugin: Successfully generated sources: {}", sourcesJarFile.getAbsolutePath());
+    }
+
+    /**
+     * Extracts the key from a command-line argument.
+     * For arguments like "-key=value", it returns "-key".
+     * For simple flags like "-flag", it returns "-flag".
+     *
+     * @param arg The command-line argument.
+     * @return The key of the argument.
+     */
+    private static String getArgKey(String arg) {
+        if (arg == null) {
+            return "";
+        }
+        int equalsIndex = arg.indexOf('=');
+        if (equalsIndex > 0) {
+            return arg.substring(0, equalsIndex);
+        }
+        return arg;
+    }
+
+    /**
+     * Constructs the final list of command-line arguments for the Vineflower decompiler.
+     * It intelligently merges a predefined set of default arguments with user-supplied arguments,
+     * where user-supplied arguments take precedence for the same flag key.
+     * Finally, it appends the input JAR path and output directory path.
+     *
+     * @param gameJarFile The game JAR file to be decompiled.
+     * @param tempDecompiledDir The directory where Vineflower should output the decompiled source files.
+     * @param userProvidedArgs A list of arguments provided by the user via the {@link #getVineflowerArgs()} property.
+     * @return A {@link NotNull} list of strings representing the complete arguments for Vineflower.
+     */
+    private static @NotNull List<String> constructVineflowerArgs(File gameJarFile, File tempDecompiledDir, List<String> userProvidedArgs) {
+        Map<String, String> mergedArgs = new LinkedHashMap<>();
+
+        List<String> defaultArgs = new ArrayList<>();
+        defaultArgs.add("-dgs=1");        // Decompile Generic Signatures
+        defaultArgs.add("-hdc=0");        // Hide empty super invocation
+        defaultArgs.add("-rbr=0");        // Remove Bridge Methods
+        defaultArgs.add("-asc=1");        // Encode non-ASCII characters
+        defaultArgs.add("-hes=0");        // Hide empty static initializers
+        defaultArgs.add("-din=1");        // Decompile inner classes
+        defaultArgs.add("-dc4=1");        // Decompile Class References
+        defaultArgs.add("-uto=1");        // Use LVT Names for parameters if available
+        defaultArgs.add("-udv=1");        // Use LVT Names for local variables if available
+        defaultArgs.add("-ump=1");        // Use mixed case parameter names
+        defaultArgs.add("-vac=1");        // Verify anonymous classes
+        defaultArgs.add("-log=WARN");     // Set default log level
+
+        for (String arg : defaultArgs) {
+            mergedArgs.put(getArgKey(arg), arg);
+        }
+
+        if (userProvidedArgs != null) {
+            for (String userArg : userProvidedArgs) {
+                if (userArg != null && !userArg.trim().isEmpty()) {
+                    mergedArgs.put(getArgKey(userArg), userArg);
+                }
+            }
+        }
+
+        List<String> finalArgs = new ArrayList<>(mergedArgs.values());
+
+        finalArgs.add(gameJarFile.getAbsolutePath());
+        finalArgs.add(tempDecompiledDir.getAbsolutePath());
+
+        return finalArgs;
+    }
+}

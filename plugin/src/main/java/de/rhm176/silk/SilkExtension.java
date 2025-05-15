@@ -33,6 +33,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.inject.Inject;
+
+import org.gradle.api.Action;
 import org.gradle.api.GradleException;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
@@ -40,6 +42,7 @@ import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.file.RegularFile;
 import org.gradle.api.model.ObjectFactory;
+import org.gradle.api.provider.Property;
 import org.gradle.api.provider.Provider;
 import org.jetbrains.annotations.ApiStatus;
 
@@ -59,6 +62,7 @@ public abstract class SilkExtension {
     private Provider<RegularFile> internalGameJarProvider;
     private final DirectoryProperty runDir;
     private final Project project;
+    private final VineflowerExtension vineflower;
 
     /**
      * Cached result of the Equilinox game JAR search.
@@ -74,7 +78,10 @@ public abstract class SilkExtension {
     public SilkExtension(ObjectFactory objectFactory, Project project) {
         // default set in SilkPlugin
         this.runDir = objectFactory.directoryProperty();
+
         this.project = project;
+
+        this.vineflower = objectFactory.newInstance(VineflowerExtension.class);
     }
 
     /**
@@ -107,6 +114,43 @@ public abstract class SilkExtension {
         });
 
         this.internalGameJarProvider = project.getLayout().file(singleFileProvider);
+    }
+
+    /**
+     * Provides access to the Vineflower decompiler specific configurations.
+     * <p>
+     * Use this to set the Vineflower version or add custom decompiler arguments.
+     * Example in {@code build.gradle.kts}:
+     * <pre>
+     * silk {
+     *     vineflower.version.set("1.9.3")
+     *     vineflower.args.add("-myarg=value")
+     * }
+     * </pre>
+     *
+     * @return The {@link VineflowerExtension} instance.
+     */
+    public VineflowerExtension getVineflower() {
+        return vineflower;
+    }
+
+    /**
+     * Configures the Vineflower decompiler settings using an {@link Action}.
+     * <p>
+     * This method allows for a more idiomatic configuration block in Groovy-based Gradle scripts:
+     * <pre>
+     * silk {
+     *     vineflower {
+     *         version = "1.9.3"
+     *         args << "-myarg=value"
+     *     }
+     * }
+     * </pre>
+     *
+     * @param action The configuration action for Vineflower settings.
+     */
+    public void vineflower(Action<? super VineflowerExtension> action) {
+        action.execute(vineflower);
     }
 
     /**

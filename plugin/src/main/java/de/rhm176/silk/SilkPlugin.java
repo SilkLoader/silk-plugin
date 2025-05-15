@@ -27,6 +27,7 @@ import org.gradle.api.GradleException;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
+import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.repositories.ArtifactRepository;
 import org.gradle.api.artifacts.repositories.MavenArtifactRepository;
 import org.gradle.api.file.RegularFile;
@@ -42,8 +43,13 @@ import org.jetbrains.annotations.NotNull;
  * <p>
  * This plugin performs several actions:
  * <ul>
+ * <li>Applies the 'java' plugin.</li>
+ * <li>Conditionally adds necessary Maven repositories.</li>
  * <li>Creates an {@code equilinox} configuration for specifying the game JAR.</li>
- * <li>Registers the {@link SilkExtension} under the name {@code silk} for user configuration.</li>
+ * <li>Registers the {@link SilkExtension} under the name {@code silk} for user configuration,
+ * which includes a nested {@link VineflowerExtension} for decompiler settings.</li>
+ * <li>Creates a {@code vineflowerTool} configuration for the Vineflower decompiler dependency.</li>
+ * <li>Registers a {@code genSources} task of type {@link GenerateSourcesTask} to decompile the game JAR.</li>
  * <li>Registers a {@code runGame} task of type {@link JavaExec} to launch the game with the mod.</li>
  * <li>Adds the configured game JAR as a {@code compileOnly} dependency to the project.</li>
  * </ul>
@@ -85,6 +91,42 @@ public class SilkPlugin implements Plugin<Project> {
         extension
                 .getRunDir()
                 .convention(project.getLayout().getProjectDirectory().dir("run"));
+
+        Configuration vineflowerClasspath = project.getConfigurations().create("vineflowerTool", config -> {
+            config.setDescription("Classpath for Vineflower decompiler tool.");
+            config.setVisible(false);
+            config.setCanBeConsumed(false);
+            config.setCanBeResolved(true);
+            config.setTransitive(true);
+
+            Provider<Dependency> vineflowerDependency = extension.getVineflower().getVersion().map(
+                    versionString ->
+                            project.getDependencies().create("org.vineflower:vineflower:" + versionString)
+            );
+            config.getDependencies().addLater(vineflowerDependency);
+        });
+
+        project.getTasks().register("genSources", GenerateSourcesTask.class, task -> {
+            task.setGroup("Silk");
+            task.setDescription("Decompiles the game JAR using Vineflower to produce a sources JAR.");
+
+            task.getInputJar().value(extension.getGameJar());
+            task.getVineflowerClasspath().setFrom(vineflowerClasspath);
+            task.getVineflowerArgs().set(extension.getVineflower().getArgs());
+
+            Provider<RegularFile> gameJarProvider = extension.getGameJar();
+            task.getOutputSourcesJar().set(
+                    gameJarProvider.flatMap(jar ->
+                            project.getLayout().getBuildDirectory().file(
+                                    "silk-sources/" + jar.getAsFile().getName().replace(".jar", "") + "-sources.jar"
+                            )
+                    )
+            );
+
+            task.getInputs().file(gameJarProvider)
+                    .withPathSensitivity(PathSensitivity.NAME_ONLY)
+                    .optional(false);
+        });
 
         project.getTasks().register("runGame", JavaExec.class, task -> {
             task.setGroup("Silk");
