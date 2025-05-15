@@ -2,6 +2,7 @@ plugins {
     id("java-gradle-plugin")
     id("maven-publish")
     id("java")
+    id("com.diffplug.spotless") version "7.0.3"
 }
 
 version = findProperty("version")!!
@@ -46,5 +47,16 @@ publishing {
 
             artifactId = "silk-plugin"
         }
+    }
+}
+
+spotless {
+    java {
+        licenseHeaderFile(file("HEADER"))
+
+        importOrder()
+        removeUnusedImports()
+
+        palantirJavaFormat("2.66.0")
     }
 }

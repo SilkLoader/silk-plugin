@@ -1,5 +1,28 @@
+/*
+ * Copyright (c) 2025 Silk Loader
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
 package de.rhm176.silk;
 
+import java.io.File;
+import java.net.URI;
 import org.gradle.api.GradleException;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
@@ -13,9 +36,6 @@ import org.gradle.api.tasks.bundling.Jar;
 import org.gradle.jvm.toolchain.JavaLanguageVersion;
 import org.gradle.jvm.toolchain.JavaToolchainService;
 import org.jetbrains.annotations.NotNull;
-
-import java.io.File;
-import java.net.URI;
 
 /**
  * Main plugin class for Silk, a Gradle plugin to facilitate mod development for Equilinox.
@@ -57,13 +77,11 @@ public class SilkPlugin implements Plugin<Project> {
             config.setTransitive(false);
         });
 
-        SilkExtension extension = project.getExtensions().create(
-                "silk",
-                SilkExtension.class,
-                project
-        );
+        SilkExtension extension = project.getExtensions().create("silk", SilkExtension.class, project);
         extension.initializeGameJarProvider(equilinoxConfiguration, project);
-        extension.getRunDir().convention(project.getLayout().getProjectDirectory().dir("run"));
+        extension
+                .getRunDir()
+                .convention(project.getLayout().getProjectDirectory().dir("run"));
 
         project.getTasks().register("runGame", JavaExec.class, task -> {
             task.setGroup("Silk");
@@ -77,8 +95,8 @@ public class SilkPlugin implements Plugin<Project> {
 
             task.jvmArgs(
                     "-Dfabric.development=true",
-                    "-Dfabric.gameJarPath=" + extension.getGameJar().get().getAsFile().toPath().toAbsolutePath()
-            );
+                    "-Dfabric.gameJarPath="
+                            + extension.getGameJar().get().getAsFile().toPath().toAbsolutePath());
 
             JavaToolchainService javaToolchains = project.getExtensions().findByType(JavaToolchainService.class);
             if (javaToolchains != null) {
@@ -87,49 +105,56 @@ public class SilkPlugin implements Plugin<Project> {
                 int targetJavaVersion = defaultJavaVersion;
 
                 if (project.hasProperty(javaVersionPropertyName)) {
-                    String propertyValue = project.property(javaVersionPropertyName).toString();
+                    String propertyValue =
+                            project.property(javaVersionPropertyName).toString();
                     try {
                         targetJavaVersion = Integer.parseInt(propertyValue);
-                        project.getLogger().info("runGame task: Using Java version {} from project property '{}'.", targetJavaVersion, javaVersionPropertyName);
+                        project.getLogger()
+                                .info(
+                                        "runGame task: Using Java version {} from project property '{}'.",
+                                        targetJavaVersion,
+                                        javaVersionPropertyName);
                     } catch (NumberFormatException e) {
-                        project.getLogger().warn(
-                                "runGame task: Value '{}' for project property '{}' is not a valid integer. Using default Java version {}.",
-                                propertyValue,
-                                javaVersionPropertyName,
-                                defaultJavaVersion
-                        );
+                        project.getLogger()
+                                .warn(
+                                        "runGame task: Value '{}' for project property '{}' is not a valid integer. Using default Java version {}.",
+                                        propertyValue,
+                                        javaVersionPropertyName,
+                                        defaultJavaVersion);
                     }
                 } else {
-                    project.getLogger().info(
-                            "runGame task: Project property '{}' not found. Using default Java version {}.",
-                            javaVersionPropertyName,
-                            defaultJavaVersion
-                    );
+                    project.getLogger()
+                            .info(
+                                    "runGame task: Project property '{}' not found. Using default Java version {}.",
+                                    javaVersionPropertyName,
+                                    defaultJavaVersion);
                 }
 
                 final int finalJavaVersion = targetJavaVersion;
-                task.getJavaLauncher().set(javaToolchains.launcherFor(spec ->
-                        spec.getLanguageVersion().set(JavaLanguageVersion.of(finalJavaVersion))));
+                task.getJavaLauncher().set(javaToolchains.launcherFor(spec -> spec.getLanguageVersion()
+                        .set(JavaLanguageVersion.of(finalJavaVersion))));
             } else {
-                project.getLogger().warn(
-                        "runGame task: JavaToolchainService not found. " +
-                                "Ensure a Java-related plugin (e.g., 'java' or 'java-library') is applied to the project. " +
-                                "The task will use the default JVM."
-                );
+                project.getLogger()
+                        .warn("runGame task: JavaToolchainService not found. "
+                                + "Ensure a Java-related plugin (e.g., 'java' or 'java-library') is applied to the project. "
+                                + "The task will use the default JVM.");
             }
 
             task.classpath(
                     extension.getGameJar(),
                     modJarFileProvider,
-                    project.getConfigurations().getByName("runtimeClasspath")
-            );
+                    project.getConfigurations().getByName("runtimeClasspath"));
 
-            task.dependsOn(jarTaskProvider, equilinoxConfiguration, project.getConfigurations().named("runtimeClasspath"));
+            task.dependsOn(
+                    jarTaskProvider,
+                    equilinoxConfiguration,
+                    project.getConfigurations().named("runtimeClasspath"));
 
             task.doFirst(t -> {
                 if (!runDir.exists()) {
                     if (!runDir.mkdirs()) {
-                        project.getLogger().warn("runGame task: Failed to create working directory: {}", runDir.getAbsolutePath());
+                        project.getLogger()
+                                .warn("runGame task: Failed to create working directory: {}", runDir.getAbsolutePath());
                     }
                 }
 
@@ -146,12 +171,10 @@ public class SilkPlugin implements Plugin<Project> {
 
             if (gameJarIsPresent) {
                 File gameJarFile = extension.getGameJar().get().getAsFile();
-                p.getDependencies().add(
-                        "compileOnly",
-                        p.files(gameJarFile.getAbsolutePath())
-                );
+                p.getDependencies().add("compileOnly", p.files(gameJarFile.getAbsolutePath()));
             } else {
-                project.getLogger().info("Silk plugin: 'gameJar' not configured in silk extension. Skipping dependency addition.");
+                project.getLogger()
+                        .info("Silk plugin: 'gameJar' not configured in silk extension. Skipping dependency addition.");
             }
         });
     }
@@ -176,7 +199,7 @@ public class SilkPlugin implements Plugin<Project> {
                 if (MAVEN_CENTRAL_URL1.equals(repoUrl) || MAVEN_CENTRAL_URL2.equals(repoUrl)) {
                     mavenCentralExists = true;
                 }
-                if (FABRIC_MAVEN_URL.regionMatches(true, 0, repoUrl, 0, FABRIC_MAVEN_URL.length() -1 )) {
+                if (FABRIC_MAVEN_URL.regionMatches(true, 0, repoUrl, 0, FABRIC_MAVEN_URL.length() - 1)) {
                     fabricMavenExists = true;
                 }
             }

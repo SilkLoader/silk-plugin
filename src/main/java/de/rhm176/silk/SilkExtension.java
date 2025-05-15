@@ -1,16 +1,26 @@
+/*
+ * Copyright (c) 2025 Silk Loader
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
 package de.rhm176.silk;
 
-import org.gradle.api.GradleException;
-import org.gradle.api.Project;
-import org.gradle.api.artifacts.Configuration;
-import org.gradle.api.file.DirectoryProperty;
-import org.gradle.api.file.FileCollection;
-import org.gradle.api.file.RegularFile;
-import org.gradle.api.model.ObjectFactory;
-import org.gradle.api.provider.Provider;
-import org.jetbrains.annotations.ApiStatus;
-
-import javax.inject.Inject;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -22,6 +32,16 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import javax.inject.Inject;
+import org.gradle.api.GradleException;
+import org.gradle.api.Project;
+import org.gradle.api.artifacts.Configuration;
+import org.gradle.api.file.DirectoryProperty;
+import org.gradle.api.file.FileCollection;
+import org.gradle.api.file.RegularFile;
+import org.gradle.api.model.ObjectFactory;
+import org.gradle.api.provider.Provider;
+import org.jetbrains.annotations.ApiStatus;
 
 /**
  * Configuration extension for the Silk Gradle plugin.
@@ -41,7 +61,6 @@ public abstract class SilkExtension {
     private final Project project;
 
     /**
-     * Constructor for dependency injection by Gradle.
      * @param objectFactory Gradle's {@link ObjectFactory} for creating domain objects.
      */
     @Inject
@@ -65,16 +84,17 @@ public abstract class SilkExtension {
         Provider<File> singleFileProvider = project.provider(() -> {
             List<File> files = equilinoxConfig.getFiles().stream().toList();
             if (files.isEmpty()) {
-                project.getLogger().debug("No files found in '{}' configuration for game JAR.", equilinoxConfig.getName());
+                project.getLogger()
+                        .debug("No files found in '{}' configuration for game JAR.", equilinoxConfig.getName());
                 return null;
             }
             if (files.size() > 1) {
-                project.getLogger().warn(
-                        "Multiple files found in the '{}' configuration. Using the first one: {}. " +
-                                "Please ensure only one game JAR is specified.",
-                        equilinoxConfig.getName(),
-                        files.get(0).getAbsolutePath()
-                );
+                project.getLogger()
+                        .warn(
+                                "Multiple files found in the '{}' configuration. Using the first one: {}. "
+                                        + "Please ensure only one game JAR is specified.",
+                                equilinoxConfig.getName(),
+                                files.get(0).getAbsolutePath());
             }
             return files.get(0);
         });
@@ -92,8 +112,8 @@ public abstract class SilkExtension {
      */
     public Provider<RegularFile> getGameJar() {
         if (this.internalGameJarProvider == null) {
-            throw new IllegalStateException("SilkExtension.internalGameJarProvider has not been initialized. " +
-                    "This is likely an internal plugin error.");
+            throw new IllegalStateException("SilkExtension.internalGameJarProvider has not been initialized. "
+                    + "This is likely an internal plugin error.");
         }
         return internalGameJarProvider;
     }
@@ -151,7 +171,8 @@ public abstract class SilkExtension {
 
         List<Path> steamLibraryRoots = findSteamLibraryRoots(os);
 
-        project.getLogger().info("Silk: Searching for Equilinox JAR in {} Steam library roots...", steamLibraryRoots.size());
+        project.getLogger()
+                .info("Silk: Searching for Equilinox JAR in {} Steam library roots...", steamLibraryRoots.size());
 
         for (Path libraryRoot : steamLibraryRoots) {
             Path commonDir = libraryRoot.resolve("steamapps").resolve("common");
@@ -169,8 +190,8 @@ public abstract class SilkExtension {
         }
 
         project.getLogger().error("Silk: Equilinox game JAR could not be found automatically.");
-        throw new GradleException("Silk plugin: Could not automatically find Equilinox game JAR. " +
-                "Searched common Steam locations.");
+        throw new GradleException(
+                "Silk plugin: Could not automatically find Equilinox game JAR. " + "Searched common Steam locations.");
     }
 
     private List<Path> findSteamLibraryRoots(String os) {
@@ -196,12 +217,13 @@ public abstract class SilkExtension {
         if (os.contains("win")) {
             vdfPossibleLocations.add(Paths.get("C:\\Program Files (x86)\\Steam\\steamapps\\libraryfolders.vdf"));
         } else if (os.contains("mac")) {
-            vdfPossibleLocations.add(Paths.get(userHome, "Library", "Application Support", "Steam", "steamapps", "libraryfolders.vdf"));
+            vdfPossibleLocations.add(
+                    Paths.get(userHome, "Library", "Application Support", "Steam", "steamapps", "libraryfolders.vdf"));
         } else {
             vdfPossibleLocations.add(Paths.get(userHome, ".steam", "steam", "steamapps", "libraryfolders.vdf"));
-            vdfPossibleLocations.add(Paths.get(userHome, ".local", "share", "Steam", "steamapps", "libraryfolders.vdf"));
+            vdfPossibleLocations.add(
+                    Paths.get(userHome, ".local", "share", "Steam", "steamapps", "libraryfolders.vdf"));
         }
-
 
         Pattern pathPattern = Pattern.compile("^\\s*\"path\"\\s+\"([^\"]+)\"");
         for (Path vdfPath : vdfPossibleLocations.stream().distinct().toList()) {
@@ -215,7 +237,8 @@ public abstract class SilkExtension {
                         }
                     });
                 } catch (IOException e) {
-                    project.getLogger().warn("Silk: Could not read Steam libraryfolders.vdf at {}: {}", vdfPath, e.getMessage());
+                    project.getLogger()
+                            .warn("Silk: Could not read Steam libraryfolders.vdf at {}: {}", vdfPath, e.getMessage());
                 }
             }
         }
