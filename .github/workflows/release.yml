@@ -68,26 +68,37 @@ jobs:
         with:
           configurationJson: |
             {
+              "conventionalCommits": true,
               "categories": [
                 {
-                  "title": "## ✨ Features",
-                  "labels": ["feature", "feat"]
+                  "title": "## 🚀 Features",
+                  "labels": ["feature", "feat"],
+                  "mode": "HYBRID"
                 },
                 {
-                  "title": "## 🐛 Bug Fixes",
-                  "labels": ["fix", "bugfix", "bug"]
+                  "title": "## 🐛 Fixes",
+                  "labels": ["fix", "bugfix", "bug"],
+                  "mode": "HYBRID"
+                },
+                {
+                  "title": "## 🧪 Tests",
+                  "labels": ["test"],
+                  "mode": "HYBRID"
                 },
                 {
                   "title": "## 📝 Documentation",
-                  "labels": ["docs", "documentation"]
+                  "labels": ["docs", "documentation"],
+                  "mode": "HYBRID"
                 },
                 {
-                  "title": "##  dependents Chore",
-                  "labels": ["chore"]
+                  "title": "## Chore",
+                  "labels": ["chore"],
+                  "mode": "HYBRID"
                 },
                 {
                   "title": "## Other Changes",
-                  "labels": []
+                  "labels": [],
+                  "mode": "HYBRID"
                 }
               ],
               "template": "#{{CHANGELOG}}\n\n<details>\n<summary>Uncategorized</summary>\n\n#{{UNCATEGORIZED}}\n</details>",
