@@ -390,28 +390,22 @@ public class SilkPlugin implements Plugin<Project> {
             });
         });
 
-        project.getDependencies()
-                .addProvider(
-                        JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME,
-                        extension.getGameJar().flatMap(gameJarFile -> {
-                            if (gameJarFile.getAsFile().exists()) {
-                                return project.provider(() ->
-                                        project.files(gameJarFile.getAsFile().getAbsolutePath()));
-                            } else {
-                                project.getLogger()
-                                        .warn(
-                                                "Silk: 'gameJar' ({}) not found or not configured. Skipping compileOnly dependency addition.",
-                                                gameJarFile.getAsFile().getPath());
-                                return project.provider(project::files);
-                            }
-                        }),
-                        dependency -> {
-                            if (!extension.getGameJar().isPresent()) {
-                                project.getLogger()
-                                        .info(
-                                                "Silk plugin: 'gameJar' not configured in silk extension. Skipping compileOnly dependency addition.");
-                            }
-                        });
+        project.getDependencies().addProvider(
+                JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME,
+                extension.getGameJar().flatMap(gameJarRegularFile -> {
+                    File gameJarAsIoFile = gameJarRegularFile.getAsFile();
+                    if (gameJarAsIoFile.exists()) {
+                        return project.provider(() -> project.files(gameJarAsIoFile.getAbsolutePath()));
+                    } else {
+                        project.getLogger().warn(
+                                "Silk: The configured 'gameJar' points to a non-existent file: '{}'. " +
+                                        "It will not be added to compileOnly dependencies.",
+                                gameJarAsIoFile.getAbsolutePath()
+                        );
+                        return project.provider(project::files);
+                    }
+                })
+        );
     }
 
     /**
