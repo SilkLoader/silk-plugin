@@ -137,8 +137,8 @@ public abstract class ExtractNativesTask extends DefaultTask {
             while (entries.hasMoreElements()) {
                 JarEntry entry = entries.nextElement();
                 if (!entry.isDirectory()
-                        && !entry.getName().contains("/") // Root directory of JAR
-                        && !entry.getName().contains("\\") // Root directory of JAR (Windows)
+                        && !entry.getName().contains("/")
+                        && !entry.getName().contains("\\")
                         && isNativeFile(entry.getName(), getOsName().get())) {
 
                     File outputFile = new File(nativesDir, entry.getName());

@@ -27,6 +27,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -57,10 +58,60 @@ import org.jetbrains.annotations.ApiStatus;
  * </pre>
  */
 public abstract class SilkExtension {
+    /**
+     * Container for registering subprojects to be bundled with the main mod.
+     * Accessed via {@code silk.mods { ... }} in the build script.
+     */
+    public static class ModRegistration {
+        private final Project rootProject;
+        private final List<Project> targetList;
+
+        /**
+         * Constructs a ModRegistration container.
+         * This constructor is typically called by Gradle's {@link ObjectFactory}.
+         *
+         * @param rootProject The root project to which the Silk plugin is applied.
+         * @param targetList  The list in {@link SilkExtension} where registered subprojects are stored.
+         */
+        @Inject
+        public ModRegistration(Project rootProject, List<Project> targetList) {
+            this.rootProject = rootProject;
+            this.targetList = targetList;
+        }
+
+        /**
+         * Registers a subproject to be bundled.
+         * <p>
+         * The specified subproject's JAR output will be included in the
+         * {@code META-INF/jars/} directory of the main mod's JAR, and an
+         * entry will be added to the main mod's {@code fabric.mod.json}.
+         *
+         * @param subProject The Gradle {@link Project} instance of the subproject to bundle (e.g., {@code project(":submoduleA")}).
+         */
+        public void register(Project subProject) {
+            if (subProject == null) {
+                rootProject
+                        .getLogger()
+                        .warn("Silk: Attempted to register a null subproject in 'silk.mods.register()'.");
+                return;
+            }
+            if (!targetList.contains(subProject)) {
+                targetList.add(subProject);
+                rootProject.getLogger().info("Silk: Registered subproject '{}' for bundling.", subProject.getPath());
+            } else {
+                rootProject
+                        .getLogger()
+                        .info("Silk: Subproject '{}' is already registered for bundling.", subProject.getPath());
+            }
+        }
+    }
+
     private Provider<RegularFile> internalGameJarProvider;
     private final DirectoryProperty runDir;
     private final Project project;
     private final VineflowerExtension vineflower;
+    private final ModRegistration modsContainer;
+    private final List<Project> registeredSubprojects = new ArrayList<>();
 
     /**
      * Cached result of the Equilinox game JAR search.
@@ -81,6 +132,62 @@ public abstract class SilkExtension {
         this.project = project;
 
         this.vineflower = objectFactory.newInstance(VineflowerExtension.class);
+
+        this.modsContainer = objectFactory.newInstance(ModRegistration.class, project, registeredSubprojects);
+    }
+
+    /**
+     * Provides access to the {@link ModRegistration} container for configuring bundled submods.
+     * <p>
+     * Example in {@code build.gradle.kts}:
+     * <pre>
+     * silk {
+     *     mods.register(project(":mySubmod"))
+     * }
+     * </pre>
+     * Or in {@code build.gradle}:
+     * <pre>
+     * silk {
+     *     mods {
+     *         register project(':mySubmod')
+     *     }
+     * }
+     * </pre>
+     *
+     * @return The {@link ModRegistration} instance.
+     */
+    public ModRegistration getMods() {
+        return modsContainer;
+    }
+
+    /**
+     * Configures the bundled submods using an {@link Action}.
+     * <p>
+     * This method allows for a more idiomatic configuration block in Groovy-based Gradle scripts:
+     * <pre>
+     * silk {
+     *     mods {
+     *         register project(':mySubmod')
+     *
+     *     }
+     * }
+     * </pre>
+     *
+     * @param action The configuration action for {@link ModRegistration}.
+     */
+    public void mods(Action<? super ModRegistration> action) {
+        action.execute(modsContainer);
+    }
+
+    /**
+     * Retrieves an unmodifiable list of subprojects registered for bundling.
+     * This method is intended for internal use by the plugin.
+     *
+     * @return An unmodifiable list of {@link Project} instances.
+     */
+    @ApiStatus.Internal
+    List<Project> getRegisteredSubprojectsInternal() {
+        return Collections.unmodifiableList(registeredSubprojects);
     }
 
     /**

@@ -17,6 +17,10 @@ gradlePlugin {
     }
 }
 
+dependencies {
+    implementation("com.fasterxml.jackson.core:jackson-databind:${project.findProperty("jacksonVersion")}")
+}
+
 allprojects {
     apply(plugin = "java")
 

@@ -21,22 +21,35 @@
  */
 package de.rhm176.silk;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.SerializationFeature;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.io.File;
+import java.io.IOException;
 import java.net.URI;
-import org.gradle.api.GradleException;
-import org.gradle.api.Plugin;
-import org.gradle.api.Project;
+import java.nio.file.Files;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Set;
+import java.util.stream.Collectors;
+import org.gradle.api.*;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.repositories.ArtifactRepository;
 import org.gradle.api.artifacts.repositories.MavenArtifactRepository;
-import org.gradle.api.file.Directory;
-import org.gradle.api.file.RegularFile;
+import org.gradle.api.file.*;
+import org.gradle.api.plugins.JavaPlugin;
+import org.gradle.api.plugins.JavaPluginExtension;
 import org.gradle.api.provider.Provider;
 import org.gradle.api.tasks.*;
 import org.gradle.api.tasks.bundling.Jar;
 import org.gradle.jvm.toolchain.JavaLanguageVersion;
 import org.gradle.jvm.toolchain.JavaToolchainService;
+import org.gradle.language.jvm.tasks.ProcessResources;
 import org.jetbrains.annotations.NotNull;
 
 /**
@@ -121,11 +134,6 @@ public class SilkPlugin implements Plugin<Project> {
             task.getOutputSourcesJar().set(gameJarProvider.flatMap(jar -> project.getLayout()
                     .getBuildDirectory()
                     .file("silk-sources/" + jar.getAsFile().getName().replace(".jar", "") + "-sources.jar")));
-
-            task.getInputs()
-                    .file(gameJarProvider)
-                    .withPathSensitivity(PathSensitivity.NAME_ONLY)
-                    .optional(false);
         });
 
         Provider<Directory> nativesDir = project.getLayout().getBuildDirectory().dir("silk-natives");
@@ -135,11 +143,169 @@ public class SilkPlugin implements Plugin<Project> {
                     task.setDescription("Extracts native libraries from the game JAR.");
                     task.getInputJar().set(extension.getGameJar());
                     task.getNativesDir().set(nativesDir);
-                    task.getInputs()
-                            .file(extension.getGameJar())
-                            .withPathSensitivity(PathSensitivity.NAME_ONLY)
-                            .optional(false);
                 });
+
+        Provider<FileCollection> subprojectOutputFilesProvider = project.provider(() -> {
+            List<Object> jarTaskOutputs = extension.getRegisteredSubprojectsInternal().stream()
+                    .map(subProject -> {
+                        try {
+                            return subProject.getTasks().named(JavaPlugin.JAR_TASK_NAME, Jar.class);
+                        } catch (UnknownTaskException e) {
+                            project.getLogger()
+                                    .warn(
+                                            "Silk: Subproject '{}' does not have a 'jar' task of type Jar. Cannot bundle its output.",
+                                            subProject.getPath());
+                            return null;
+                        }
+                    })
+                    .filter(Objects::nonNull)
+                    .collect(Collectors.toList());
+            return project.files(jarTaskOutputs);
+        });
+
+        TaskProvider<Task> modifyFabricModJsonTask = project.getTasks().register("silkModifyFabricModJson", task -> {
+            task.setGroup(null);
+            task.setDescription("Adds bundled submod JAR references to fabric.mod.json.");
+
+            JavaPluginExtension javaExtension = project.getExtensions().getByType(JavaPluginExtension.class);
+            SourceSet mainSourceSet = javaExtension.getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
+            TaskProvider<ProcessResources> processResourcesTask =
+                    project.getTasks().named(mainSourceSet.getProcessResourcesTaskName(), ProcessResources.class);
+
+            DirectoryProperty resourcesOutputDir = project.getObjects().directoryProperty();
+            resourcesOutputDir.set(
+                    project.getLayout().dir(processResourcesTask.map(ProcessResources::getDestinationDir)));
+            task.getInputs().dir(resourcesOutputDir).withPathSensitivity(PathSensitivity.RELATIVE);
+
+            Provider<List<String>> bundledJarNamesProvider =
+                    project.provider(() -> extension.getRegisteredSubprojectsInternal().stream()
+                            .map(subProject -> {
+                                try {
+                                    return subProject
+                                            .getTasks()
+                                            .named("jar", Jar.class)
+                                            .flatMap(Jar::getArchiveFileName)
+                                            .getOrNull();
+                                } catch (UnknownTaskException e) {
+                                    project.getLogger()
+                                            .warn(
+                                                    "Silk: Subproject '{}' does not have a 'jar' task of type Jar. Cannot determine its archive name for fabric.mod.json.",
+                                                    subProject.getPath());
+                                    return null;
+                                }
+                            })
+                            .filter(Objects::nonNull)
+                            .collect(Collectors.toList()));
+            task.getInputs().property("bundledJarNames", bundledJarNamesProvider);
+
+            task.dependsOn(processResourcesTask);
+
+            RegularFileProperty outputFabricModJsonFile = project.getObjects().fileProperty();
+            outputFabricModJsonFile.set(resourcesOutputDir.file("fabric.mod.json"));
+            task.getOutputs().file(outputFabricModJsonFile).withPropertyName("modifiedFabricModJson");
+
+            task.doLast(t -> {
+                File fabricModJsonFile = outputFabricModJsonFile.get().getAsFile();
+                List<String> bundledJarFileNames = bundledJarNamesProvider.get();
+
+                if (!fabricModJsonFile.exists()) {
+                    t.getLogger()
+                            .info(
+                                    "Silk: fabric.mod.json not found at '{}'. Skipping modification.",
+                                    fabricModJsonFile.getAbsolutePath());
+                    return;
+                }
+                if (bundledJarFileNames.isEmpty()) {
+                    t.getLogger()
+                            .info("Silk: No submods registered for bundling. Skipping fabric.mod.json modification.");
+                    return;
+                }
+
+                ObjectMapper objectMapper = new ObjectMapper();
+                objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
+
+                try {
+                    JsonNode rootNode = objectMapper.readTree(fabricModJsonFile);
+                    if (!rootNode.isObject()) {
+                        t.getLogger()
+                                .error(
+                                        "Silk: fabric.mod.json content is not a JSON object. Path: {}",
+                                        fabricModJsonFile.getAbsolutePath());
+                        return;
+                    }
+                    ObjectNode objectNode = (ObjectNode) rootNode;
+
+                    ArrayNode jarsArrayNode;
+                    if (objectNode.has("jars")) {
+                        JsonNode jarsField = objectNode.get("jars");
+                        if (jarsField.isArray()) {
+                            jarsArrayNode = (ArrayNode) jarsField;
+                        } else {
+                            t.getLogger()
+                                    .warn(
+                                            "Silk: 'jars' field in fabric.mod.json is present but not an array. It will be overwritten with a new array including bundled mods.");
+                            jarsArrayNode = objectMapper.createArrayNode();
+                            objectNode.set("jars", jarsArrayNode);
+                        }
+                    } else {
+                        jarsArrayNode = objectMapper.createArrayNode();
+                        objectNode.set("jars", jarsArrayNode);
+                    }
+
+                    Set<String> existingJarPaths = new HashSet<>();
+                    for (JsonNode entry : jarsArrayNode) {
+                        if (entry.isObject()
+                                && entry.has("file")
+                                && entry.get("file").isTextual()) {
+                            existingJarPaths.add(entry.get("file").asText());
+                        }
+                    }
+
+                    int newEntriesAdded = 0;
+                    for (String bundledJarName : bundledJarFileNames) {
+                        String jarPathInMetaInf = "META-INF/jars/" + bundledJarName;
+                        if (!existingJarPaths.contains(jarPathInMetaInf)) {
+                            ObjectNode newJarEntry = objectMapper.createObjectNode();
+                            newJarEntry.put("file", jarPathInMetaInf);
+                            jarsArrayNode.add(newJarEntry);
+                            newEntriesAdded++;
+                        }
+                    }
+
+                    if (newEntriesAdded > 0) {
+                        File tempFile = Files.createTempFile(
+                                        fabricModJsonFile.getParentFile().toPath(), "fabric.mod.json", ".tmp")
+                                .toFile();
+                        objectMapper.writeValue(tempFile, objectNode);
+                        Files.move(
+                                tempFile.toPath(),
+                                fabricModJsonFile.toPath(),
+                                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
+                                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
+                        t.getLogger()
+                                .lifecycle(
+                                        "Silk: Updated fabric.mod.json at '{}' with {} new bundled mod entries.",
+                                        fabricModJsonFile.getAbsolutePath(),
+                                        newEntriesAdded);
+                    } else {
+                        t.getLogger()
+                                .info(
+                                        "Silk: All registered bundled mods are already present in fabric.mod.json or no new mods to add.");
+                    }
+
+                } catch (IOException e) {
+                    throw new GradleException(
+                            "Silk: Failed to read or write fabric.mod.json at " + fabricModJsonFile.getAbsolutePath(),
+                            e);
+                }
+            });
+        });
+
+        project.getTasks().named("jar", Jar.class, jarTask -> {
+            jarTask.dependsOn(modifyFabricModJsonTask);
+
+            jarTask.from(subprojectOutputFilesProvider, copySpec -> copySpec.into("META-INF/jars/"));
+        });
 
         project.getTasks().register("runGame", JavaExec.class, task -> {
             task.setGroup("Silk");
@@ -160,62 +326,58 @@ public class SilkPlugin implements Plugin<Project> {
                             + nativesDir.get().getAsFile().toPath().toAbsolutePath());
 
             JavaToolchainService javaToolchains = project.getExtensions().findByType(JavaToolchainService.class);
-            if (javaToolchains != null) {
-                String javaVersionPropertyName = "javaVersion";
-                int defaultJavaVersion = DEFAULT_JAVA_VER;
-                int targetJavaVersion = defaultJavaVersion;
+            assert javaToolchains != null; // stupid ide, this is impossible since silk applies `java`.
 
-                if (project.hasProperty(javaVersionPropertyName)) {
-                    String propertyValue =
-                            project.property(javaVersionPropertyName).toString();
-                    try {
-                        targetJavaVersion = Integer.parseInt(propertyValue);
-                        project.getLogger()
-                                .info(
-                                        "runGame task: Using Java version {} from project property '{}'.",
-                                        targetJavaVersion,
-                                        javaVersionPropertyName);
-                    } catch (NumberFormatException e) {
-                        project.getLogger()
-                                .warn(
-                                        "runGame task: Value '{}' for project property '{}' is not a valid integer. Using default Java version {}.",
-                                        propertyValue,
-                                        javaVersionPropertyName,
-                                        defaultJavaVersion);
-                    }
-                } else {
-                    project.getLogger()
+            String javaVersionPropertyName = "javaVersion";
+            int defaultJavaVersion = DEFAULT_JAVA_VER;
+            int targetJavaVersion = defaultJavaVersion;
+
+            if (project.hasProperty(javaVersionPropertyName)) {
+                String propertyValue = Optional.ofNullable(project.property(javaVersionPropertyName))
+                        .map(Object::toString)
+                        .orElse("N/A");
+                try {
+                    targetJavaVersion = Integer.parseInt(propertyValue);
+                    task.getLogger()
                             .info(
-                                    "runGame task: Project property '{}' not found. Using default Java version {}.",
+                                    "runGame task: Using Java version {} from project property '{}'.",
+                                    targetJavaVersion,
+                                    javaVersionPropertyName);
+                } catch (NumberFormatException e) {
+                    task.getLogger()
+                            .warn(
+                                    "runGame task: Value '{}' for project property '{}' is not a valid integer. Using default Java version {}.",
+                                    propertyValue,
                                     javaVersionPropertyName,
                                     defaultJavaVersion);
                 }
-
-                final int finalJavaVersion = targetJavaVersion;
-                task.getJavaLauncher().set(javaToolchains.launcherFor(spec -> spec.getLanguageVersion()
-                        .set(JavaLanguageVersion.of(finalJavaVersion))));
             } else {
-                project.getLogger()
-                        .warn("runGame task: JavaToolchainService not found. "
-                                + "Ensure a Java-related plugin (e.g., 'java' or 'java-library') is applied to the project. "
-                                + "The task will use the default JVM.");
+                task.getLogger()
+                        .info(
+                                "runGame task: Project property '{}' not found. Using default Java version {}.",
+                                javaVersionPropertyName,
+                                defaultJavaVersion);
             }
+
+            final int finalJavaVersion = targetJavaVersion;
+            task.getJavaLauncher().set(javaToolchains.launcherFor(spec -> spec.getLanguageVersion()
+                    .set(JavaLanguageVersion.of(finalJavaVersion))));
 
             task.classpath(
                     extension.getGameJar(),
                     modJarFileProvider,
-                    project.getConfigurations().getByName("runtimeClasspath"));
+                    project.getConfigurations().getByName(JavaPlugin.RUNTIME_CLASSPATH_CONFIGURATION_NAME));
 
             task.dependsOn(
                     jarTaskProvider,
                     extractNativesTaskProvider,
                     equilinoxConfiguration,
-                    project.getConfigurations().named("runtimeClasspath"));
+                    project.getConfigurations().named(JavaPlugin.RUNTIME_CLASSPATH_CONFIGURATION_NAME));
 
             task.doFirst(t -> {
                 if (!runDir.exists()) {
                     if (!runDir.mkdirs()) {
-                        project.getLogger()
+                        t.getLogger()
                                 .warn("runGame task: Failed to create working directory: {}", runDir.getAbsolutePath());
                     }
                 }
@@ -228,17 +390,28 @@ public class SilkPlugin implements Plugin<Project> {
             });
         });
 
-        project.afterEvaluate(p -> {
-            boolean gameJarIsPresent = extension.getGameJar().isPresent();
-
-            if (gameJarIsPresent) {
-                File gameJarFile = extension.getGameJar().get().getAsFile();
-                p.getDependencies().add("compileOnly", p.files(gameJarFile.getAbsolutePath()));
-            } else {
-                project.getLogger()
-                        .info("Silk plugin: 'gameJar' not configured in silk extension. Skipping dependency addition.");
-            }
-        });
+        project.getDependencies()
+                .addProvider(
+                        JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME,
+                        extension.getGameJar().flatMap(gameJarFile -> {
+                            if (gameJarFile.getAsFile().exists()) {
+                                return project.provider(() ->
+                                        project.files(gameJarFile.getAsFile().getAbsolutePath()));
+                            } else {
+                                project.getLogger()
+                                        .warn(
+                                                "Silk: 'gameJar' ({}) not found or not configured. Skipping compileOnly dependency addition.",
+                                                gameJarFile.getAsFile().getPath());
+                                return project.provider(project::files);
+                            }
+                        }),
+                        dependency -> {
+                            if (!extension.getGameJar().isPresent()) {
+                                project.getLogger()
+                                        .info(
+                                                "Silk plugin: 'gameJar' not configured in silk extension. Skipping compileOnly dependency addition.");
+                            }
+                        });
     }
 
     /**
@@ -263,7 +436,7 @@ public class SilkPlugin implements Plugin<Project> {
                     mavenCentralExists = true;
                 }
                 if (JITPACK_MAVEN_URL.equals(repoUrl)) {
-                    mavenCentralExists = true;
+                    jitpackMavenExists = true;
                 }
                 if (FABRIC_MAVEN_URL.regionMatches(true, 0, repoUrl, 0, FABRIC_MAVEN_URL.length() - 1)) {
                     fabricMavenExists = true;
