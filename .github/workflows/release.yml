@@ -70,7 +70,7 @@ jobs:
         id: generate_changelog
         uses: mikepenz/release-changelog-builder-action@v5
         with:
-          mode: "COMMIT"
+          mode: "HYBRID"
           configurationJson: |
             {
               "categories": [
@@ -95,7 +95,7 @@ jobs:
                   "mode": "HYBRID"
                 },
                 {
-                  "title": "## Chore",
+                  "title": "## 🧹 Chores",
                   "labels": ["chore"],
                   "mode": "HYBRID"
                 },
@@ -105,7 +105,7 @@ jobs:
                   "mode": "HYBRID"
                 }
               ],
-              "template": "#{{CHANGELOG}}\n\n<details>\n<summary>Uncategorized</summary>\n\n#{{UNCATEGORIZED}}\n</details>",
+              "template": "#{{CHANGELOG}},
               "empty_template": "No notable changes for this release."
             }
         env:
