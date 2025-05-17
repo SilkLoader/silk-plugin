@@ -30,6 +30,7 @@ import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.repositories.ArtifactRepository;
 import org.gradle.api.artifacts.repositories.MavenArtifactRepository;
+import org.gradle.api.file.Directory;
 import org.gradle.api.file.RegularFile;
 import org.gradle.api.provider.Provider;
 import org.gradle.api.tasks.*;
@@ -50,6 +51,7 @@ import org.jetbrains.annotations.NotNull;
  * which includes a nested {@link VineflowerExtension} for decompiler settings.</li>
  * <li>Creates a {@code vineflowerTool} configuration for the Vineflower decompiler dependency.</li>
  * <li>Registers a {@code genSources} task of type {@link GenerateSourcesTask} to decompile the game JAR.</li>
+ * <li>Registers an {@code extractNatives} task of type {@link ExtractNativesTask} to extract native libraries from the game JAR.</li>
  * <li>Registers a {@code runGame} task of type {@link JavaExec} to launch the game with the mod.</li>
  * <li>Adds the configured game JAR as a {@code compileOnly} dependency to the project.</li>
  * </ul>
@@ -126,6 +128,19 @@ public class SilkPlugin implements Plugin<Project> {
                     .optional(false);
         });
 
+        Provider<Directory> nativesDir = project.getLayout().getBuildDirectory().dir("silk-natives");
+        TaskProvider<ExtractNativesTask> extractNativesTaskProvider = project.getTasks()
+                .register("extractNatives", ExtractNativesTask.class, task -> {
+                    task.setGroup("Silk");
+                    task.setDescription("Extracts native libraries from the game JAR.");
+                    task.getInputJar().set(extension.getGameJar());
+                    task.getNativesDir().set(nativesDir);
+                    task.getInputs()
+                            .file(extension.getGameJar())
+                            .withPathSensitivity(PathSensitivity.NAME_ONLY)
+                            .optional(false);
+                });
+
         project.getTasks().register("runGame", JavaExec.class, task -> {
             task.setGroup("Silk");
             task.setDescription("Runs the game.");
@@ -138,8 +153,11 @@ public class SilkPlugin implements Plugin<Project> {
 
             task.jvmArgs(
                     "-Dfabric.development=true",
+                    "-Deqmodloader.loadedNatives=true",
                     "-Dfabric.gameJarPath="
-                            + extension.getGameJar().get().getAsFile().toPath().toAbsolutePath());
+                            + extension.getGameJar().get().getAsFile().toPath().toAbsolutePath(),
+                    "-Djava.library.path="
+                            + nativesDir.get().getAsFile().toPath().toAbsolutePath());
 
             JavaToolchainService javaToolchains = project.getExtensions().findByType(JavaToolchainService.class);
             if (javaToolchains != null) {
@@ -190,6 +208,7 @@ public class SilkPlugin implements Plugin<Project> {
 
             task.dependsOn(
                     jarTaskProvider,
+                    extractNativesTaskProvider,
                     equilinoxConfiguration,
                     project.getConfigurations().named("runtimeClasspath"));
 
@@ -249,9 +268,6 @@ public class SilkPlugin implements Plugin<Project> {
                 if (FABRIC_MAVEN_URL.regionMatches(true, 0, repoUrl, 0, FABRIC_MAVEN_URL.length() - 1)) {
                     fabricMavenExists = true;
                 }
-            }
-            if (mavenCentralExists && fabricMavenExists && jitpackMavenExists) {
-                break;
             }
         }
 
