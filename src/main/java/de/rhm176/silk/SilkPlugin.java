@@ -30,44 +30,25 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
-import java.util.HashSet;
-import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
-import java.util.Set;
+import java.util.*;
 import java.util.stream.Collectors;
 import org.gradle.api.*;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.repositories.ArtifactRepository;
 import org.gradle.api.artifacts.repositories.MavenArtifactRepository;
+import org.gradle.api.artifacts.result.ResolvedArtifactResult;
 import org.gradle.api.file.*;
 import org.gradle.api.plugins.JavaPlugin;
 import org.gradle.api.plugins.JavaPluginExtension;
 import org.gradle.api.provider.Provider;
 import org.gradle.api.tasks.*;
 import org.gradle.api.tasks.bundling.Jar;
-import org.gradle.jvm.toolchain.JavaLanguageVersion;
-import org.gradle.jvm.toolchain.JavaToolchainService;
 import org.gradle.language.jvm.tasks.ProcessResources;
 import org.jetbrains.annotations.NotNull;
 
 /**
  * Main plugin class for Silk, a Gradle plugin to facilitate mod development for Equilinox.
- * <p>
- * This plugin performs several actions:
- * <ul>
- * <li>Applies the 'java' plugin.</li>
- * <li>Conditionally adds necessary Maven repositories.</li>
- * <li>Creates an {@code equilinox} configuration for specifying the game JAR.</li>
- * <li>Registers the {@link SilkExtension} under the name {@code silk} for user configuration,
- * which includes a nested {@link VineflowerExtension} for decompiler settings.</li>
- * <li>Creates a {@code vineflowerTool} configuration for the Vineflower decompiler dependency.</li>
- * <li>Registers a {@code genSources} task of type {@link GenerateSourcesTask} to decompile the game JAR.</li>
- * <li>Registers an {@code extractNatives} task of type {@link ExtractNativesTask} to extract native libraries from the game JAR.</li>
- * <li>Registers a {@code runGame} task of type {@link JavaExec} to launch the game with the mod.</li>
- * <li>Adds the configured game JAR as a {@code compileOnly} dependency to the project.</li>
- * </ul>
  */
 public class SilkPlugin implements Plugin<Project> {
     // Fabric Loader requires at least Java 17.
@@ -107,6 +88,77 @@ public class SilkPlugin implements Plugin<Project> {
                 .getRunDir()
                 .convention(project.getLayout().getProjectDirectory().dir("run"));
 
+        JavaPluginExtension javaExtension = project.getExtensions().getByType(JavaPluginExtension.class);
+        SourceSet mainSourceSet = javaExtension.getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
+        TaskProvider<ProcessResources> processResourcesTask =
+                project.getTasks().named(mainSourceSet.getProcessResourcesTaskName(), ProcessResources.class);
+
+        Configuration compileClasspath =
+                project.getConfigurations().getByName(JavaPlugin.COMPILE_CLASSPATH_CONFIGURATION_NAME);
+
+        TaskProvider<TransformClassesTask> transformGameClassesTaskProvider = project.getTasks()
+                .register("transformGameClasses", TransformClassesTask.class, task -> {
+                    task.setDescription("Adds synthetic interfaces to game classes for API exposure.");
+                    task.setGroup(null);
+
+                    task.getInputJar().set(extension.getGameJar());
+
+                    Provider<RegularFile> currentProjectModJsonProvider = project.getLayout()
+                            .file(processResourcesTask.map(
+                                    prTask -> new File(prTask.getDestinationDir(), "fabric.mod.json")));
+                    task.getModConfigurationSources()
+                            .from(currentProjectModJsonProvider
+                                    .map(RegularFile::getAsFile)
+                                    .filter(File::exists));
+
+                    for (Project subProject : extension.getRegisteredSubprojectsInternal()) {
+                        subProject.getPlugins().withId("java", appliedJavaPlugin -> {
+                            JavaPluginExtension subJavaExt =
+                                    subProject.getExtensions().getByType(JavaPluginExtension.class);
+                            SourceSet subMainSS = subJavaExt.getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
+                            String subProcessResourcesTaskName = subMainSS.getProcessResourcesTaskName();
+
+                            if (subProject.getTasks().getNames().contains(subProcessResourcesTaskName)) {
+                                task.getLogger().debug("in mich rein");
+                                TaskProvider<ProcessResources> subProcessResourcesTask = subProject
+                                        .getTasks()
+                                        .named(subProcessResourcesTaskName, ProcessResources.class);
+
+                                Provider<RegularFile> subModJsonProvider = subProject
+                                        .getLayout()
+                                        .file(subProcessResourcesTask.map(
+                                                prTask -> new File(prTask.getDestinationDir(), "fabric.mod.json")));
+                                task.getModConfigurationSources()
+                                        .from(subModJsonProvider
+                                                .map(RegularFile::getAsFile)
+                                                .filter(File::exists));
+                            } else {
+                                project.getLogger()
+                                        .warn(
+                                                "Silk: Subproject {} does not have a '{}' task. Cannot find its fabric.mod.json for class transformation.",
+                                                subProject.getPath(),
+                                                subProcessResourcesTaskName);
+                            }
+                        });
+                    }
+
+                    Provider<Set<File>> dependencyJarsProvider = compileClasspath
+                            .getIncoming()
+                            .getArtifacts()
+                            .getResolvedArtifacts()
+                            .map(resolvedArtifactSet -> resolvedArtifactSet.stream()
+                                    .map(ResolvedArtifactResult::getFile)
+                                    .filter(file -> file.getName().endsWith(".jar") && file.isFile())
+                                    .collect(Collectors.toSet()));
+                    task.getModConfigurationSources().from(dependencyJarsProvider);
+
+                    Provider<RegularFile> gameJarProvider = extension.getGameJar();
+                    task.getOutputTransformedJar().set(gameJarProvider.flatMap(jar -> project.getLayout()
+                            .getBuildDirectory()
+                            .file("silk/transformed-jars/"
+                                    + jar.getAsFile().getName().replace(".jar", "") + "-transformed.jar")));
+                });
+
         Configuration vineflowerClasspath = project.getConfigurations().create("vineflowerTool", config -> {
             config.setDescription("Classpath for Vineflower decompiler tool.");
             config.setVisible(false);
@@ -126,17 +178,20 @@ public class SilkPlugin implements Plugin<Project> {
             task.setGroup("Silk");
             task.setDescription("Decompiles the game JAR using Vineflower to produce a sources JAR.");
 
-            task.getInputJar().value(extension.getGameJar());
+            task.dependsOn(transformGameClassesTaskProvider);
+
+            task.getInputJar()
+                    .set(transformGameClassesTaskProvider.flatMap(TransformClassesTask::getOutputTransformedJar));
             task.getVineflowerClasspath().setFrom(vineflowerClasspath);
             task.getVineflowerArgs().set(extension.getVineflower().getArgs());
 
             Provider<RegularFile> gameJarProvider = extension.getGameJar();
             task.getOutputSourcesJar().set(gameJarProvider.flatMap(jar -> project.getLayout()
                     .getBuildDirectory()
-                    .file("silk-sources/" + jar.getAsFile().getName().replace(".jar", "") + "-sources.jar")));
+                    .file("silk/sources/" + jar.getAsFile().getName().replace(".jar", "") + "-sources.jar")));
         });
 
-        Provider<Directory> nativesDir = project.getLayout().getBuildDirectory().dir("silk-natives");
+        Provider<Directory> nativesDir = project.getLayout().getBuildDirectory().dir("silk/natives");
         TaskProvider<ExtractNativesTask> extractNativesTaskProvider = project.getTasks()
                 .register("extractNatives", ExtractNativesTask.class, task -> {
                     task.setGroup("Silk");
@@ -166,11 +221,6 @@ public class SilkPlugin implements Plugin<Project> {
         TaskProvider<Task> modifyFabricModJsonTask = project.getTasks().register("silkModifyFabricModJson", task -> {
             task.setGroup(null);
             task.setDescription("Adds bundled submod JAR references to fabric.mod.json.");
-
-            JavaPluginExtension javaExtension = project.getExtensions().getByType(JavaPluginExtension.class);
-            SourceSet mainSourceSet = javaExtension.getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
-            TaskProvider<ProcessResources> processResourcesTask =
-                    project.getTasks().named(mainSourceSet.getProcessResourcesTaskName(), ProcessResources.class);
 
             DirectoryProperty resourcesOutputDir = project.getObjects().directoryProperty();
             resourcesOutputDir.set(
@@ -325,44 +375,6 @@ public class SilkPlugin implements Plugin<Project> {
                     "-Djava.library.path="
                             + nativesDir.get().getAsFile().toPath().toAbsolutePath());
 
-            JavaToolchainService javaToolchains = project.getExtensions().findByType(JavaToolchainService.class);
-            assert javaToolchains != null; // stupid ide, this is impossible since silk applies `java`.
-
-            String javaVersionPropertyName = "javaVersion";
-            int defaultJavaVersion = DEFAULT_JAVA_VER;
-            int targetJavaVersion = defaultJavaVersion;
-
-            if (project.hasProperty(javaVersionPropertyName)) {
-                String propertyValue = Optional.ofNullable(project.property(javaVersionPropertyName))
-                        .map(Object::toString)
-                        .orElse("N/A");
-                try {
-                    targetJavaVersion = Integer.parseInt(propertyValue);
-                    task.getLogger()
-                            .info(
-                                    "runGame task: Using Java version {} from project property '{}'.",
-                                    targetJavaVersion,
-                                    javaVersionPropertyName);
-                } catch (NumberFormatException e) {
-                    task.getLogger()
-                            .warn(
-                                    "runGame task: Value '{}' for project property '{}' is not a valid integer. Using default Java version {}.",
-                                    propertyValue,
-                                    javaVersionPropertyName,
-                                    defaultJavaVersion);
-                }
-            } else {
-                task.getLogger()
-                        .info(
-                                "runGame task: Project property '{}' not found. Using default Java version {}.",
-                                javaVersionPropertyName,
-                                defaultJavaVersion);
-            }
-
-            final int finalJavaVersion = targetJavaVersion;
-            task.getJavaLauncher().set(javaToolchains.launcherFor(spec -> spec.getLanguageVersion()
-                    .set(JavaLanguageVersion.of(finalJavaVersion))));
-
             task.classpath(
                     extension.getGameJar(),
                     modJarFileProvider,
@@ -390,22 +402,17 @@ public class SilkPlugin implements Plugin<Project> {
             });
         });
 
-        project.getDependencies().addProvider(
-                JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME,
-                extension.getGameJar().flatMap(gameJarRegularFile -> {
-                    File gameJarAsIoFile = gameJarRegularFile.getAsFile();
-                    if (gameJarAsIoFile.exists()) {
-                        return project.provider(() -> project.files(gameJarAsIoFile.getAbsolutePath()));
-                    } else {
-                        project.getLogger().warn(
-                                "Silk: The configured 'gameJar' points to a non-existent file: '{}'. " +
-                                        "It will not be added to compileOnly dependencies.",
-                                gameJarAsIoFile.getAbsolutePath()
-                        );
-                        return project.provider(project::files);
-                    }
-                })
-        );
+        project.getDependencies()
+                .addProvider(
+                        JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME,
+                        extension.getGameJar().flatMap(gameJarRegularFile -> {
+                            File gameJarAsIoFile = gameJarRegularFile.getAsFile();
+                            if (gameJarAsIoFile.exists()) {
+                                return project.provider(() -> project.files(gameJarAsIoFile.getAbsolutePath()));
+                            } else {
+                                return project.provider(project::files);
+                            }
+                        }));
     }
 
     /**

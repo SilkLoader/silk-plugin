@@ -23,6 +23,7 @@ repositories {
 
 dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind:${project.property("jacksonVersion")}")
+    implementation("org.ow2.asm:asm:${project.property("asmVersion")}")
 
     compileOnly("org.jetbrains:annotations:${project.property("annotationsVersion")}")
 }
