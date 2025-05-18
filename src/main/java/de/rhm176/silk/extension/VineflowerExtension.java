@@ -19,8 +19,9 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-package de.rhm176.silk;
+package de.rhm176.silk.extension;
 
+import de.rhm176.silk.task.GenerateSourcesTask;
 import java.util.Collections;
 import javax.inject.Inject;
 import org.gradle.api.model.ObjectFactory;

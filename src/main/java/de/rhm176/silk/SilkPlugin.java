@@ -26,6 +26,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import de.rhm176.silk.extension.FabricExtension;
+import de.rhm176.silk.task.ExtractNativesTask;
+import de.rhm176.silk.task.GenerateFabricJsonTask;
+import de.rhm176.silk.task.GenerateSourcesTask;
+import de.rhm176.silk.task.TransformClassesTask;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
@@ -92,6 +97,43 @@ public class SilkPlugin implements Plugin<Project> {
         SourceSet mainSourceSet = javaExtension.getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
         TaskProvider<ProcessResources> processResourcesTask =
                 project.getTasks().named(mainSourceSet.getProcessResourcesTaskName(), ProcessResources.class);
+
+        Provider<Directory> generatedFabricModJsonDir =
+                project.getLayout().getBuildDirectory().dir("generated/silk/resources/" + mainSourceSet.getName());
+
+        TaskProvider<GenerateFabricJsonTask> generateFabricModJson = project.getTasks()
+                .register("generateFabricModJson", GenerateFabricJsonTask.class, task -> {
+                    task.setDescription("Generates the fabric.mod.json file from silk.fabricManifest configuration.");
+                    task.setGroup(null);
+
+                    task.onlyIf(spec -> extension.getGenerateFabricModJson().getOrElse(false));
+
+                    FabricExtension manifestConfig = extension.getFabric();
+                    task.getId().set(manifestConfig.getId());
+                    task.getVersion().set(manifestConfig.getVersion());
+                    task.getModName().set(manifestConfig.getName());
+                    task.getModDescription().set(manifestConfig.getDescription());
+                    task.getAuthors().set(manifestConfig.getAuthors());
+                    task.getContributors().set(manifestConfig.getContributors());
+                    task.getLicenses().set(manifestConfig.getLicenses());
+                    task.getContact().set(manifestConfig.getContact());
+                    task.getJars().set(manifestConfig.getJars());
+                    task.getLanguageAdapters().set(manifestConfig.getLanguageAdapters());
+                    task.getMixins().set(manifestConfig.getMixins());
+                    task.getDepends().set(manifestConfig.getDepends());
+                    task.getRecommends().set(manifestConfig.getRecommends());
+                    task.getSuggests().set(manifestConfig.getSuggests());
+                    task.getConflicts().set(manifestConfig.getConflicts());
+                    task.getBreaks().set(manifestConfig.getBreaks());
+                    task.getAccessWidener().set(manifestConfig.getAccessWidener());
+                    task.getIconFile().set(manifestConfig.getIconFile());
+                    task.getIconSet().set(manifestConfig.getIconSet());
+                    task.getEntrypointsContainer().set(manifestConfig.getEntrypoints());
+                    task.getCustomData().set(manifestConfig.getCustomData());
+
+                    task.getOutputFile().set(generatedFabricModJsonDir.map(d -> d.file("fabric.mod.json")));
+                });
+        processResourcesTask.configure(processResources -> processResources.dependsOn(generateFabricModJson));
 
         Configuration compileClasspath =
                 project.getConfigurations().getByName(JavaPlugin.COMPILE_CLASSPATH_CONFIGURATION_NAME);
@@ -218,7 +260,7 @@ public class SilkPlugin implements Plugin<Project> {
             return project.files(jarTaskOutputs);
         });
 
-        TaskProvider<Task> modifyFabricModJsonTask = project.getTasks().register("silkModifyFabricModJson", task -> {
+        TaskProvider<Task> modifyFabricModJsonTask = project.getTasks().register("modifyFabricModJson", task -> {
             task.setGroup(null);
             task.setDescription("Adds bundled submod JAR references to fabric.mod.json.");
 
@@ -413,6 +455,30 @@ public class SilkPlugin implements Plugin<Project> {
                                 return project.provider(project::files);
                             }
                         }));
+
+        project.afterEvaluate(evaluatedProject -> {
+            SilkExtension currentExtension = evaluatedProject.getExtensions().getByType(SilkExtension.class);
+            boolean isGenerationEnabled =
+                    currentExtension.getGenerateFabricModJson().getOrElse(false);
+            File manualFabricModJsonFile = evaluatedProject
+                    .getLayout()
+                    .getProjectDirectory()
+                    .file("src/main/resources/fabric.mod.json")
+                    .getAsFile();
+
+            SourceSet currentMainSourceSet = evaluatedProject.getExtensions().getByType(JavaPluginExtension.class)
+                    .getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
+
+            if (isGenerationEnabled) {
+                currentMainSourceSet.getResources().srcDir(generatedFabricModJsonDir);
+
+                if (manualFabricModJsonFile.exists()) {
+                    throw new GradleException(
+                            "Silk Plugin: 'silk.generateFabricModJson' is true, but a 'src/main/resources/fabric.mod.json' "
+                                    + "also exists. Please either remove the manual file or set 'generateFabricModJson = false'.");
+                }
+            }
+        });
     }
 
     /**

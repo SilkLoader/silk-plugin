@@ -19,8 +19,10 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
  */
-package de.rhm176.silk;
+package de.rhm176.silk.task;
 
+import de.rhm176.silk.SilkExtension;
+import de.rhm176.silk.SilkPlugin;
 import java.io.File;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
