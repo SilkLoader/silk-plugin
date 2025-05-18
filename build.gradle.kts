@@ -17,35 +17,27 @@ gradlePlugin {
     }
 }
 
-dependencies {
-    implementation("com.fasterxml.jackson.core:jackson-databind:${project.findProperty("jacksonVersion")}")
+repositories {
+    mavenCentral()
 }
 
-allprojects {
-    apply(plugin = "java")
+dependencies {
+    implementation("com.fasterxml.jackson.core:jackson-databind:${project.property("jacksonVersion")}")
 
-    repositories {
-        mavenCentral()
-    }
-
-    dependencies {
-        compileOnly("org.jetbrains:annotations:${rootProject.findProperty("annotationsVersion")}")
-    }
-
-    java {
-        val javaLanguageVersion = JavaLanguageVersion.of(rootProject.findProperty("javaVersion").toString())
-        val javaVersion = JavaVersion.toVersion(javaLanguageVersion.asInt())
-
-        toolchain {
-            languageVersion = javaLanguageVersion
-        }
-
-        sourceCompatibility = javaVersion
-        targetCompatibility = javaVersion
-    }
+    compileOnly("org.jetbrains:annotations:${project.property("annotationsVersion")}")
 }
 
 java {
+    val javaLanguageVersion = JavaLanguageVersion.of(project.findProperty("javaVersion").toString())
+    val javaVersion = JavaVersion.toVersion(javaLanguageVersion.asInt())
+
+    toolchain {
+        languageVersion = javaLanguageVersion
+    }
+
+    sourceCompatibility = javaVersion
+    targetCompatibility = javaVersion
+
     withSourcesJar()
     withJavadocJar()
 }
