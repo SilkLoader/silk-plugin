@@ -41,7 +41,7 @@ import java.util.List;
  * @see FieldAccessWidener
  * @see <a href="https://wiki.fabricmc.net/tutorial:accesswideners">FabricMC Access Wideners</a>
  */
-public sealed abstract class AccessWidenerRule permits ClassAccessWidener, MethodAccessWidener, FieldAccessWidener {
+public abstract sealed class AccessWidenerRule permits ClassAccessWidener, MethodAccessWidener, FieldAccessWidener {
     private final AccessModifier modifier;
     private final String className;
 

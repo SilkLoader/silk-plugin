@@ -23,7 +23,6 @@ package de.rhm176.silk.accesswidener;
 
 import java.io.*;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import org.gradle.api.GradleException;

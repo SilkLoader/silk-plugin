@@ -141,7 +141,7 @@ public abstract class TransformClassesTask extends DefaultTask {
         if (rawRules == null) return organizedRules;
 
         for (AccessWidenerRule rule : rawRules) {
-            String classNameInternal = rule.getClassName();;
+            String classNameInternal = rule.getClassName();
             AccessModifier modifier = rule.getModifier();
 
             if (rule instanceof ClassAccessWidener classWidener) {
@@ -374,7 +374,8 @@ public abstract class TransformClassesTask extends DefaultTask {
                         File fmjFile = new File(fmjSourceDescription);
                         File awFile = new File(fmjFile.getParentFile(), awPath);
                         if (awFile.exists() && awFile.isFile()) {
-                            widener = new AccessWidener(Files.newInputStream(awFile.toPath()), awFile.getAbsolutePath());
+                            widener =
+                                    new AccessWidener(Files.newInputStream(awFile.toPath()), awFile.getAbsolutePath());
                         } else {
                             getLogger()
                                     .warn(
