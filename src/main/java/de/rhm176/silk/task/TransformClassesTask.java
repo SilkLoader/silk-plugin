@@ -23,6 +23,7 @@ package de.rhm176.silk.task;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import de.rhm176.silk.accesswidener.*;
 import java.io.*;
 import java.util.*;
 import java.util.jar.JarEntry;
@@ -35,10 +36,8 @@ import org.gradle.api.GradleException;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.RegularFileProperty;
 import org.gradle.api.tasks.*;
-import org.objectweb.asm.ClassReader;
-import org.objectweb.asm.ClassVisitor;
-import org.objectweb.asm.ClassWriter;
-import org.objectweb.asm.Opcodes;
+import org.gradle.api.tasks.Optional;
+import org.objectweb.asm.*;
 
 /**
  * A Gradle task that transforms class files from an input JAR by adding specified interfaces
@@ -49,6 +48,50 @@ import org.objectweb.asm.Opcodes;
  * classes modified to implement the additional interfaces.
  */
 public abstract class TransformClassesTask extends DefaultTask {
+    static final class ProcessedAccessWidener {
+        AccessModifier classModifier;
+        Map<String, AccessModifier> fieldModifiers = new HashMap<>();
+        Map<String, AccessModifier> methodModifiers = new HashMap<>();
+
+        boolean isEmpty() {
+            return classModifier == null && fieldModifiers.isEmpty() && methodModifiers.isEmpty();
+        }
+
+        void updateClassModifierWithRule(AccessModifier newRuleModifier) {
+            if (newRuleModifier == AccessModifier.EXTENDABLE) {
+                this.classModifier = AccessModifier.EXTENDABLE;
+            } else if (newRuleModifier == AccessModifier.ACCESSIBLE) {
+                if (this.classModifier != AccessModifier.EXTENDABLE) {
+                    this.classModifier = AccessModifier.ACCESSIBLE;
+                }
+            }
+        }
+
+        void addFieldRule(String name, String desc, AccessModifier modifier) {
+            String key = name + ":" + desc;
+            AccessModifier current = fieldModifiers.get(key);
+            if (modifier == AccessModifier.MUTABLE) {
+                fieldModifiers.put(key, AccessModifier.MUTABLE);
+            } else if (modifier == AccessModifier.ACCESSIBLE) {
+                if (current != AccessModifier.MUTABLE) {
+                    fieldModifiers.put(key, AccessModifier.ACCESSIBLE);
+                }
+            }
+        }
+
+        void addMethodRule(String name, String desc, AccessModifier modifier) {
+            String key = name + desc;
+            AccessModifier current = methodModifiers.get(key);
+            if (modifier == AccessModifier.EXTENDABLE) {
+                methodModifiers.put(key, AccessModifier.EXTENDABLE);
+            } else if (modifier == AccessModifier.ACCESSIBLE) {
+                if (current != AccessModifier.EXTENDABLE) {
+                    methodModifiers.put(key, AccessModifier.ACCESSIBLE);
+                }
+            }
+        }
+    }
+
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
 
     /**
@@ -72,12 +115,68 @@ public abstract class TransformClassesTask extends DefaultTask {
     public abstract ConfigurableFileCollection getModConfigurationSources();
 
     /**
+     * The Access Widener file to apply.
+     * If provided, its rules will be applied to the classes in the input JAR.
+     *
+     * @return A {@link RegularFileProperty} for the Access Widener file.
+     */
+    @Optional
+    @InputFile
+    @PathSensitive(PathSensitivity.RELATIVE)
+    public abstract RegularFileProperty getAccessWidenerFile();
+
+    /**
      * The output JAR file where the transformed classes and all other original entries will be stored.
      *
      * @return A {@link RegularFileProperty} for the output transformed JAR.
      */
     @OutputFile
     public abstract RegularFileProperty getOutputTransformedJar();
+
+    private Map<String, ProcessedAccessWidener> aggregatedProcessedAwRules = Collections.emptyMap();
+
+    private Map<String, ProcessedAccessWidener> processRawAwRules(List<AccessWidenerRule> rawRules) {
+        Map<String, ProcessedAccessWidener> organizedRules = new HashMap<>();
+        if (rawRules == null) return organizedRules;
+
+        for (AccessWidenerRule rule : rawRules) {
+            String classNameInternal;
+            AccessModifier modifier = rule.getModifier();
+
+            if (rule instanceof ClassAccessWidener classWidener) {
+                classNameInternal = classWidener.getClassName();
+                ProcessedAccessWidener classRules =
+                        organizedRules.computeIfAbsent(classNameInternal, k -> new ProcessedAccessWidener());
+                classRules.updateClassModifierWithRule(modifier);
+            } else if (rule instanceof MethodAccessWidener methodWidener) {
+                classNameInternal = methodWidener.getClassName();
+                ProcessedAccessWidener classRules =
+                        organizedRules.computeIfAbsent(classNameInternal, k -> new ProcessedAccessWidener());
+                classRules.addMethodRule(methodWidener.getMethodName(), methodWidener.getMethodDescriptor(), modifier);
+            } else if (rule instanceof FieldAccessWidener fieldWidener) {
+                classNameInternal = fieldWidener.getClassName();
+                ProcessedAccessWidener classRules =
+                        organizedRules.computeIfAbsent(classNameInternal, k -> new ProcessedAccessWidener());
+                classRules.addFieldRule(fieldWidener.getFieldName(), fieldWidener.getFieldDescriptor(), modifier);
+            }
+        }
+
+        for (ProcessedAccessWidener classRules : organizedRules.values()) {
+            for (AccessModifier fieldMod : classRules.fieldModifiers.values()) {
+                if (fieldMod == AccessModifier.ACCESSIBLE || fieldMod == AccessModifier.MUTABLE) {
+                    classRules.updateClassModifierWithRule(AccessModifier.ACCESSIBLE);
+                }
+            }
+            for (AccessModifier methodMod : classRules.methodModifiers.values()) {
+                if (methodMod == AccessModifier.ACCESSIBLE) {
+                    classRules.updateClassModifierWithRule(AccessModifier.ACCESSIBLE);
+                } else if (methodMod == AccessModifier.EXTENDABLE) {
+                    classRules.updateClassModifierWithRule(AccessModifier.EXTENDABLE);
+                }
+            }
+        }
+        return organizedRules;
+    }
 
     /**
      * Executes the transformation process.
@@ -105,40 +204,50 @@ public abstract class TransformClassesTask extends DefaultTask {
             }
         }
 
-        getLogger().lifecycle("Starting transformation of JAR: {}", inputJarFile.getName());
+        getLogger()
+                .lifecycle(
+                        "Starting transformation of JAR: {} with aggregated Access Wideners and Interface Injections",
+                        inputJarFile.getName());
+
         Map<String, List<String>> interfaceMappings = new HashMap<>();
+        List<AccessWidenerRule> allRawAwRulesList = new ArrayList<>();
 
-        for (File source : getModConfigurationSources()) {
-            getLogger().debug("Looking for fabric.mod.json in: {}", source.getAbsolutePath());
-            if (!source.exists()) {
-                getLogger().debug("Configuration source file does not exist, skipping: {}", source.getAbsolutePath());
-                continue;
-            }
+        for (File sourceFileOrJar : getModConfigurationSources().getFiles()) {
+            getLogger().debug("Processing configuration source: {}", sourceFileOrJar.getAbsolutePath());
+            if (!sourceFileOrJar.exists()) continue;
 
-            if (source.isFile() && source.getName().equals("fabric.mod.json")) {
-                getLogger().debug("Loading interface mappings from fabric.mod.json.");
-                mergeMappings(interfaceMappings, loadInterfaceMappingsFromFile(source));
-            } else if (source.isFile() && source.getName().toLowerCase().endsWith(".jar")) {
-                try (JarFile jar = new JarFile(source)) {
-                    JarEntry modJsonEntry = jar.getJarEntry("fabric.mod.json");
-                    if (modJsonEntry != null) {
-                        getLogger()
-                                .debug("Loading interface mappings from fabric.mod.json in JAR: {}", source.getName());
-                        try (InputStream is = jar.getInputStream(modJsonEntry)) {
-                            mergeMappings(
+            if (sourceFileOrJar.isFile() && sourceFileOrJar.getName().equals("fabric.mod.json")) {
+                getLogger().info("Processing direct fabric.mod.json: {}", sourceFileOrJar.getAbsolutePath());
+                try (InputStream is = new FileInputStream(sourceFileOrJar)) {
+                    processFabricModJsonStream(
+                            is, sourceFileOrJar.getAbsolutePath(), interfaceMappings, allRawAwRulesList, null);
+                } catch (IOException e) {
+                    getLogger()
+                            .error("Failed to read direct fabric.mod.json: {}", sourceFileOrJar.getAbsolutePath(), e);
+                }
+            } else if (sourceFileOrJar.isFile()
+                    && sourceFileOrJar.getName().toLowerCase().endsWith(".jar")) {
+                try (JarFile jar = new JarFile(sourceFileOrJar)) {
+                    JarEntry fmjEntry = jar.getJarEntry("fabric.mod.json");
+                    if (fmjEntry != null) {
+                        getLogger().info("Processing fabric.mod.json from JAR: {}", sourceFileOrJar.getName());
+                        try (InputStream is = jar.getInputStream(fmjEntry)) {
+                            processFabricModJsonStream(
+                                    is,
+                                    sourceFileOrJar.getName() + "!fabric.mod.json",
                                     interfaceMappings,
-                                    loadInterfaceMappingsFromStream(is, source.getName() + "!fabric.mod.json"));
+                                    allRawAwRulesList,
+                                    jar);
                         }
                     }
                 } catch (IOException e) {
-                    getLogger()
-                            .warn(
-                                    "Could not read fabric.mod.json from dependency JAR: {}",
-                                    source.getAbsolutePath(),
-                                    e);
+                    getLogger().warn("Could not read JAR: {}", sourceFileOrJar.getAbsolutePath(), e);
                 }
             }
         }
+
+        this.aggregatedProcessedAwRules =
+                allRawAwRulesList.isEmpty() ? Collections.emptyMap() : processRawAwRules(allRawAwRulesList);
 
         try (JarInputStream jis = new JarInputStream(new BufferedInputStream(new FileInputStream(inputJarFile)));
                 JarOutputStream jos =
@@ -158,16 +267,18 @@ public abstract class TransformClassesTask extends DefaultTask {
                 if (entry.getName().endsWith(".class")) {
                     String classNameInternal =
                             entry.getName().substring(0, entry.getName().length() - ".class".length());
-                    List<String> interfacesToAdd = interfaceMappings.get(classNameInternal);
+                    List<String> interfacesToAdd = interfaceMappings.get(classNameInternal); // May be null
+                    ProcessedAccessWidener awRules = this.aggregatedProcessedAwRules.getOrDefault(
+                            classNameInternal, new ProcessedAccessWidener());
 
-                    if (interfacesToAdd != null && !interfacesToAdd.isEmpty()) {
+                    if ((interfacesToAdd != null && !interfacesToAdd.isEmpty()) || !awRules.isEmpty()) {
                         getLogger()
                                 .debug(
-                                        "Transforming class {}: adding interfaces {}",
+                                        "Transforming class {}: adding interfaces {} and applying AW rules.",
                                         classNameInternal,
-                                        interfacesToAdd);
+                                        Objects.toString(interfacesToAdd, "none"));
                         try {
-                            entryBytes = addInterfacesToClassBytecode(entryBytes, interfacesToAdd);
+                            entryBytes = transformClassBytecode(entryBytes, interfacesToAdd, awRules);
                         } catch (Exception e) {
                             throw new GradleException("Failed to transform class: " + classNameInternal, e);
                         }
@@ -188,34 +299,111 @@ public abstract class TransformClassesTask extends DefaultTask {
         });
     }
 
-    private Map<String, List<String>> loadInterfaceMappingsFromFile(File modJsonFile) {
-        if (modJsonFile == null || !modJsonFile.exists() || !modJsonFile.isFile()) {
-            getLogger()
-                    .warn(
-                            "Provided mod.json file is invalid or does not exist: {}",
-                            modJsonFile != null ? modJsonFile.getAbsolutePath() : "null");
-            return Map.of();
-        }
-        try (InputStream is = new FileInputStream(modJsonFile)) {
-            return parseMappingsFromStream(is);
-        } catch (IOException e) {
-            getLogger()
-                    .error("Failed to read mod.json file for interface mappings: {}", modJsonFile.getAbsolutePath(), e);
-            return Map.of();
-        }
-    }
+    /**
+     * Processes a single fabric.mod.json stream to extract interface mappings and AW file info.
+     *
+     * @param fmjStream InputStream of the fabric.mod.json content.
+     * @param fmjSourceDescription Description of where this fmjStream comes from (for logging).
+     * @param outInterfaceMappings Map to add parsed interface mappings to.
+     * @param outRawAwRulesList List to add parsed AccessWidenerRules to.
+     * @param containingJar Optional JarFile if the fmjStream comes from within a JAR, used to resolve AW paths.
+     */
+    private void processFabricModJsonStream(
+            InputStream fmjStream,
+            String fmjSourceDescription,
+            Map<String, List<String>> outInterfaceMappings,
+            List<AccessWidenerRule> outRawAwRulesList,
+            JarFile containingJar // Pass null if fmjStream is not from a JAR
+            ) throws IOException {
+        JsonNode rootNode = OBJECT_MAPPER.readTree(fmjStream);
 
-    private Map<String, List<String>> loadInterfaceMappingsFromStream(
-            InputStream inputStream, String sourceDescription) {
-        try {
-            return parseMappingsFromStream(inputStream);
-        } catch (IOException e) {
-            getLogger()
-                    .error(
-                            "Failed to parse fabric.mod.json from stream for interface mappings: {}",
-                            sourceDescription,
-                            e);
-            return Map.of();
+        // 1. Parse Interface Mappings (as before)
+        JsonNode customNode = rootNode.path("custom");
+        if (customNode.isObject()) {
+            JsonNode injectionsNode = customNode.path("silk:injected_interfaces");
+            if (injectionsNode.isObject()) {
+                Map<String, List<String>> currentFileMappings = new HashMap<>();
+                Iterator<Map.Entry<String, JsonNode>> fields = injectionsNode.fields();
+                while (fields.hasNext()) {
+                    Map.Entry<String, JsonNode> field = fields.next();
+                    String className = field.getKey().replace('.', '/');
+                    JsonNode interfacesArray = field.getValue();
+                    if (interfacesArray.isArray()) {
+                        List<String> normalizedInterfaceNames = new ArrayList<>();
+                        for (JsonNode interfaceNode : interfacesArray) {
+                            if (interfaceNode.isTextual()) {
+                                normalizedInterfaceNames.add(
+                                        interfaceNode.asText().replace('.', '/'));
+                            }
+                        }
+                        if (!className.isEmpty() && !normalizedInterfaceNames.isEmpty()) {
+                            currentFileMappings
+                                    .computeIfAbsent(className, k -> new ArrayList<>())
+                                    .addAll(normalizedInterfaceNames);
+                        }
+                    }
+                }
+                // De-duplicate interfaces for the current file before merging globally
+                currentFileMappings.forEach(
+                        (cn, il) -> currentFileMappings.put(cn, new ArrayList<>(new HashSet<>(il))));
+                mergeMappings(outInterfaceMappings, currentFileMappings); // Your existing merge for interfaces
+            }
+        }
+
+        // 2. Parse Access Widener path and its rules
+        JsonNode awPathNode = rootNode.path("accessWidener");
+        if (awPathNode.isTextual()) {
+            String awPath = awPathNode.asText();
+            if (awPath != null && !awPath.trim().isEmpty()) {
+                getLogger().info("Found accessWidener path '{}' in {}", awPath, fmjSourceDescription);
+                try {
+                    AccessWidener widener = null;
+                    if (containingJar != null) { // AW is inside the JAR
+                        JarEntry awEntry = containingJar.getJarEntry(awPath);
+                        if (awEntry != null) {
+                            try (InputStream awStream = containingJar.getInputStream(awEntry)) {
+                                widener = new AccessWidener(awStream, containingJar.getName() + "!" + awPath);
+                            }
+                        } else {
+                            getLogger()
+                                    .warn(
+                                            "AccessWidener file '{}' not found inside JAR '{}' (referenced by {}).",
+                                            awPath,
+                                            containingJar.getName(),
+                                            fmjSourceDescription);
+                        }
+                    } else {
+                        File fmjFile = new File(fmjSourceDescription);
+                        File awFile = new File(fmjFile.getParentFile(), awPath);
+                        if (awFile.exists() && awFile.isFile()) {
+                            widener = new AccessWidener(awFile);
+                        } else {
+                            getLogger()
+                                    .warn(
+                                            "AccessWidener file '{}' (resolved to '{}') not found on filesystem (referenced by {}).",
+                                            awPath,
+                                            awFile.getAbsolutePath(),
+                                            fmjSourceDescription);
+                        }
+                    }
+
+                    if (widener != null) {
+                        outRawAwRulesList.addAll(widener.getRules());
+                        getLogger()
+                                .info(
+                                        "Added {} rules from AccessWidener: {}",
+                                        widener.getRules().size(),
+                                        awPath);
+                    }
+                } catch (IOException | GradleException e) {
+                    getLogger()
+                            .error(
+                                    "Failed to load or parse AccessWidener '{}' referenced by {}: {}",
+                                    awPath,
+                                    fmjSourceDescription,
+                                    e.getMessage());
+                }
+            }
         }
     }
 
@@ -266,11 +454,14 @@ public abstract class TransformClassesTask extends DefaultTask {
         return baos.toByteArray();
     }
 
-    private byte[] addInterfacesToClassBytecode(byte[] originalClassBytes, List<String> interfacesToAddFqns) {
+    private byte[] transformClassBytecode(
+            byte[] originalClassBytes,
+            List<String> interfacesToAddInternalNames,
+            ProcessedAccessWidener awRulesForThisClass) {
         ClassReader classReader = new ClassReader(originalClassBytes);
         ClassWriter classWriter = new ClassWriter(classReader, ClassWriter.COMPUTE_FRAMES);
 
-        ClassVisitor classVisitor = new ClassVisitor(Opcodes.ASM9, classWriter) {
+        ClassVisitor transformingVisitor = new ClassVisitor(Opcodes.ASM9, classWriter) {
             @Override
             public void visit(
                     int version,
@@ -279,29 +470,93 @@ public abstract class TransformClassesTask extends DefaultTask {
                     String signature,
                     String superName,
                     String[] existingInterfaces) {
-                Set<String> allInterfaces = new HashSet<>();
+                int newAccess = access;
+                if (awRulesForThisClass != null && awRulesForThisClass.classModifier != null) {
+                    newAccess = applyClassAccessModifier(access, awRulesForThisClass.classModifier);
+                }
 
+                Set<String> allInterfaces = new HashSet<>();
                 if (existingInterfaces != null) {
                     allInterfaces.addAll(Arrays.asList(existingInterfaces));
                 }
-
-                for (String fqn : interfacesToAddFqns) {
-                    if (fqn != null && !fqn.trim().isEmpty()) {
-                        allInterfaces.add(fqn.replace('.', '/'));
+                if (interfacesToAddInternalNames != null) {
+                    for (String internalName : interfacesToAddInternalNames) { // Already internal format
+                        if (internalName != null && !internalName.trim().isEmpty()) {
+                            allInterfaces.add(internalName);
+                        }
                     }
                 }
-                String[] newInterfacesArray = allInterfaces.toArray(new String[0]);
-                getLogger()
-                        .debug(
-                                "Class: {}, Original Interfaces: {}, New Interfaces: {}",
-                                name,
-                                Arrays.toString(existingInterfaces),
-                                Arrays.toString(newInterfacesArray));
-                super.visit(version, access, name, signature, superName, newInterfacesArray);
+                super.visit(version, newAccess, name, signature, superName, allInterfaces.toArray(new String[0]));
+            }
+
+            @Override
+            public FieldVisitor visitField(
+                    int access, String fieldName, String fieldDescriptor, String signature, Object value) {
+                int newAccess = access;
+                if (awRulesForThisClass != null) {
+                    AccessModifier fieldAwModifier =
+                            awRulesForThisClass.fieldModifiers.get(fieldName + ":" + fieldDescriptor);
+                    if (fieldAwModifier != null) {
+                        newAccess = applyFieldAccessModifier(access, fieldAwModifier);
+                    }
+                }
+                return super.visitField(newAccess, fieldName, fieldDescriptor, signature, value);
+            }
+
+            @Override
+            public MethodVisitor visitMethod(
+                    int access, String methodName, String methodDescriptor, String signature, String[] exceptions) {
+                int newAccess = access;
+                if (awRulesForThisClass != null) {
+                    AccessModifier methodAwModifier =
+                            awRulesForThisClass.methodModifiers.get(methodName + methodDescriptor);
+                    if (methodAwModifier != null) {
+                        newAccess = applyMethodAccessModifier(access, methodAwModifier);
+                    }
+                }
+                return super.visitMethod(newAccess, methodName, methodDescriptor, signature, exceptions);
             }
         };
 
-        classReader.accept(classVisitor, 0);
+        classReader.accept(transformingVisitor, ClassReader.EXPAND_FRAMES);
         return classWriter.toByteArray();
+    }
+
+    private int applyClassAccessModifier(int currentAccess, AccessModifier awModifier) {
+        if (awModifier == AccessModifier.ACCESSIBLE) {
+            return (currentAccess & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
+        } else if (awModifier == AccessModifier.EXTENDABLE) {
+            int acc = (currentAccess & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
+            return acc & ~Opcodes.ACC_FINAL;
+        }
+        return currentAccess;
+    }
+
+    private int applyFieldAccessModifier(int currentAccess, AccessModifier awModifier) {
+        int newAccess = currentAccess;
+        if (awModifier == AccessModifier.MUTABLE) {
+            newAccess &= ~Opcodes.ACC_FINAL;
+            newAccess = (newAccess & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
+        } else if (awModifier == AccessModifier.ACCESSIBLE) {
+            newAccess = (newAccess & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
+        }
+        return newAccess;
+    }
+
+    private int applyMethodAccessModifier(int currentAccess, AccessModifier awModifier) {
+        int newAccess = currentAccess;
+        if (awModifier == AccessModifier.ACCESSIBLE) {
+            newAccess = (newAccess & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
+        } else if (awModifier == AccessModifier.EXTENDABLE) {
+            newAccess &= ~Opcodes.ACC_FINAL;
+            if ((newAccess & Opcodes.ACC_STATIC) != 0) {
+                newAccess = (newAccess & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
+            } else {
+                if ((newAccess & Opcodes.ACC_PUBLIC) == 0) {
+                    newAccess = (newAccess & ~Opcodes.ACC_PRIVATE) | Opcodes.ACC_PROTECTED;
+                }
+            }
+        }
+        return newAccess;
     }
 }

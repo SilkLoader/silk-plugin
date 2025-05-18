@@ -142,6 +142,9 @@ public class SilkPlugin implements Plugin<Project> {
                     task.setDescription("Adds synthetic interfaces to game classes for API exposure.");
                     task.setGroup(null);
 
+                    // this should make it work for generated fabric.mod.json's aswell
+                    task.dependsOn(processResourcesTask);
+
                     task.getInputJar().set(extension.getGameJar());
 
                     Provider<RegularFile> currentProjectModJsonProvider = project.getLayout()
