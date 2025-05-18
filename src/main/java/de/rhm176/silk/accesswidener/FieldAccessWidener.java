@@ -23,32 +23,66 @@ package de.rhm176.silk.accesswidener;
 
 import java.util.List;
 
-public class FieldAccessWidener extends AccessWidenerRule {
-    private final String className;
+/**
+ * Represents an Access Widener rule specifically targeting a field.
+ * <p>
+ * This rule defines how the access or {@code final} status (mutability) of a specific field
+ * should be modified. It stores the target class name, field name, field descriptor,
+ * and the {@link AccessModifier} to be applied (e.g., {@code accessible} or {@code mutable}).
+ * <p>
+ * An example line in an {@code .accesswidener} file for a field rule:
+ * <pre>{@code accessible field com/example/MyClass myField Ljava/lang/String;}</pre>
+ * or
+ * <pre>{@code mutable field com/example/MyClass anIntField I}</pre>
+ *
+ * @see AccessWidenerRule
+ * @see AccessModifier
+ * @see de.rhm176.silk.task.TransformClassesTask
+ */
+public final class FieldAccessWidener extends AccessWidenerRule {
     private final String fieldName;
     private final String fieldDescriptor;
 
+    /**
+     * Constructs a new rule for widening access or modifying a field.
+     *
+     * @param modifier The {@link AccessModifier} to apply (typically {@link AccessModifier#ACCESSIBLE}
+     * or {@link AccessModifier#MUTABLE}).
+     * @param className The internal name of the class containing the field (e.g., {@code com/example/MyClass}).
+     * It is expected to be normalized (using '/' as a separator).
+     * @param fieldName The name of the field to be modified.
+     * @param fieldDescriptor The JVM descriptor of the field (e.g., {@code I} for int, {@code Ljava/lang/String;} for String).
+     */
     public FieldAccessWidener(AccessModifier modifier, String className, String fieldName, String fieldDescriptor) {
-        super(modifier);
+        super(modifier, className);
 
-        this.className = className;
         this.fieldName = fieldName;
         this.fieldDescriptor = fieldDescriptor;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public List<AccessModifier> allowedModifiers() {
         return List.of(AccessModifier.ACCESSIBLE, AccessModifier.MUTABLE);
     }
 
-    public String getClassName() {
-        return className;
-    }
-
+    /**
+     * Gets the name of the field targeted by this rule.
+     *
+     * @return The name of the target field.
+     */
     public String getFieldName() {
         return fieldName;
     }
 
+    /**
+     * Gets the JVM descriptor of the field targeted by this rule
+     * (e.g., {@code I} for an integer, {@code Ljava/lang/String;} for a String object).
+     *
+     * @return The JVM descriptor of the target field.
+     */
     public String getFieldDescriptor() {
         return fieldDescriptor;
     }

@@ -164,7 +164,6 @@ public abstract class SilkExtension {
      * Note that the verification might not be exhaustive for all possible {@code fabric.mod.json}
      * specification details (only some things are checked, and only to a specific extent), focusing on common requirements and formats.
      * The ultimate validation is performed by Fabric Loader at runtime.
-     * <p>
      *
      * @return A {@link Property} of {@link Boolean} to enable or disable {@code fabric.mod.json} validation.
      */

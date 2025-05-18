@@ -23,32 +23,64 @@ package de.rhm176.silk.accesswidener;
 
 import java.util.List;
 
-public class MethodAccessWidener extends AccessWidenerRule {
-    private final String className;
+/**
+ * Represents an Access Widener rule specifically targeting a method.
+ * <p>
+ * This rule defines how the access or {@code final} status of a specific method
+ * should be modified. It stores the target class name, method name, method descriptor,
+ * and the {@link AccessModifier} to be applied (e.g., {@code accessible} or {@code extendable}).
+ * <p>
+ * An example line in an {@code .accesswidener} file for a method rule:
+ * <pre>{@code extendable method com/example/MyClass myMethod (Ljava/lang/String;)V}</pre>
+ *
+ * @see AccessWidenerRule
+ * @see AccessModifier
+ * @see de.rhm176.silk.task.TransformClassesTask
+ */
+public final class MethodAccessWidener extends AccessWidenerRule {
     private final String methodName;
     private final String methodDescriptor;
 
+    /**
+     * Constructs a new rule for widening access to a method.
+     *
+     * @param modifier The {@link AccessModifier} to apply (e.g., {@link AccessModifier#ACCESSIBLE}
+     * or {@link AccessModifier#EXTENDABLE}).
+     * @param className The internal name of the class containing the method (e.g., {@code com/example/MyClass}).
+     * It is expected to be normalized (using '/' as a separator).
+     * @param methodName The name of the method to be modified.
+     * @param methodDescriptor The JVM descriptor of the method (e.g., {@code (Ljava/lang/String;)V}).
+     */
     public MethodAccessWidener(AccessModifier modifier, String className, String methodName, String methodDescriptor) {
-        super(modifier);
+        super(modifier, className);
 
-        this.className = className;
         this.methodName = methodName;
         this.methodDescriptor = methodDescriptor;
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public List<AccessModifier> allowedModifiers() {
         return List.of(AccessModifier.ACCESSIBLE, AccessModifier.EXTENDABLE);
     }
 
-    public String getClassName() {
-        return className;
-    }
-
+    /**
+     * Gets the name of the method targeted by this rule.
+     *
+     * @return The name of the target method.
+     */
     public String getMethodName() {
         return methodName;
     }
 
+    /**
+     * Gets the JVM descriptor of the method targeted by this rule
+     * (e.g., {@code (Ljava/lang/String;)V} for a method taking a String and returning void).
+     *
+     * @return The JVM descriptor of the target method.
+     */
     public String getMethodDescriptor() {
         return methodDescriptor;
     }

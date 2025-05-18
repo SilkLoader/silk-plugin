@@ -49,10 +49,6 @@ import org.gradle.api.GradleException;
 public class AccessWidener {
     private final List<AccessWidenerRule> rules;
 
-    public AccessWidener(File accessWidenerFile) throws IOException {
-        this(Files.newInputStream(accessWidenerFile.toPath()), accessWidenerFile.getAbsolutePath());
-    }
-
     /**
      * Parses Access Widener rules from an InputStream.
      * @param inputStream The stream containing the Access Widener data.

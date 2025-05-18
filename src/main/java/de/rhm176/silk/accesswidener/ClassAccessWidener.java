@@ -23,21 +23,40 @@ package de.rhm176.silk.accesswidener;
 
 import java.util.List;
 
-public class ClassAccessWidener extends AccessWidenerRule {
-    private final String className;
-
+/**
+ * Represents an Access Widener rule specifically targeting a class.
+ * <p>
+ * This rule defines how the access or {@code final} status of a specific class
+ * should be modified. It stores the target class name and the {@link AccessModifier}
+ * to be applied (e.g., {@code accessible} or {@code extendable}).
+ * <p>
+ * An example line in an {@code .accesswidener} file for a class rule:
+ * <pre>{@code accessible class com/example/MyTargetClass}</pre>
+ * or
+ * <pre>{@code extendable class com/example/another/AnotherClass}</pre>
+ *
+ * @see AccessWidenerRule
+ * @see AccessModifier
+ * @see de.rhm176.silk.task.TransformClassesTask
+ */
+public final class ClassAccessWidener extends AccessWidenerRule {
+    /**
+     * Constructs a new rule for widening access to a class.
+     *
+     * @param modifier The {@link AccessModifier} to apply (typically {@link AccessModifier#ACCESSIBLE}
+     * or {@link AccessModifier#EXTENDABLE}).
+     * @param className The internal name of the class to be modified (e.g., {@code com/example/MyClass}).
+     * It is expected to be normalized (using '/' as a separator).
+     */
     public ClassAccessWidener(AccessModifier modifier, String className) {
-        super(modifier);
-
-        this.className = className;
+        super(modifier, className);
     }
 
+    /**
+     * {@inheritDoc}
+     */
     @Override
     public List<AccessModifier> allowedModifiers() {
         return List.of(AccessModifier.ACCESSIBLE, AccessModifier.EXTENDABLE);
-    }
-
-    public String getClassName() {
-        return className;
     }
 }

@@ -50,6 +50,17 @@ import org.gradle.api.provider.MapProperty;
 import org.gradle.api.provider.Property;
 import org.gradle.api.tasks.*;
 
+/**
+ * Gradle task responsible for generating a {@code fabric.mod.json} file.
+ * <p>
+ * This task takes configuration inputs, typically wired from a {@link FabricExtension} instance,
+ * validates them against the fabric.mod.json specification, and then constructs
+ * the JSON file. If validation fails, the build is halted with an error detailing
+ * all identified issues.
+ *
+ * @see FabricExtension
+ * @see <a href="https://wiki.fabricmc.net/documentation:fabric_mod_json_spec">fabric.mod.json Specification</a>
+ */
 public abstract class GenerateFabricJsonTask extends DefaultTask {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
@@ -59,98 +70,237 @@ public abstract class GenerateFabricJsonTask extends DefaultTask {
             "^(\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*(\\.\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*)*)(::\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*)?$");
     private static final Set<String> VALID_ENVIRONMENTS = Set.of("*", "client", "server");
 
+    /**
+     * The mod identifier. A string matching the pattern {@code ^[a-z][a-z0-9-_]{1,63}$}.
+     * This is a mandatory field. Defaults to {@code project.getName()}.
+     * @return Property for the mod ID.
+     */
     @Input
     public abstract Property<String> getId();
 
+    /**
+     * The mod version. A string value, preferably matching Semantic Versioning 2.0.0.
+     * This is a mandatory field.
+     * @return Property for the mod version.
+     */
     @Input
     public abstract Property<String> getVersion();
 
+    /**
+     * Controls whether the configured inputs for {@code fabric.mod.json} should be validated.
+     * If true (default), extensive checks are performed. If false, validation is skipped.
+     * @return Property for enabling/disabling validation.
+     */
     @Input
     public abstract Property<Boolean> getShouldVerify();
 
+    /**
+     * The user-facing mod name. If not present, assumes it matches {@link #getId()}
+     * @return Property for the mod name.
+     */
     @Optional
     @Input
     public abstract Property<String> getModName();
 
+    /**
+     * The user-facing mod description. If not present, assumed to be an empty string.
+     * @return Property for the mod description.
+     */
     @Optional
     @Input
     public abstract Property<String> getModDescription();
 
+    /**
+     * Contains the direct authorship information.
+     * @return ListProperty for authors.
+     * @see PersonExtension
+     */
     @Optional
     @Input
     public abstract ListProperty<PersonExtension> getAuthors();
 
+    /**
+     * Contains the contributor information.
+     * @return ListProperty for contributors.
+     * @see PersonExtension
+     */
     @Optional
     @Input
     public abstract ListProperty<PersonExtension> getContributors();
 
+    /**
+     * Contains the licensing information. Can be a single license string or a list of license strings.
+     * It is recommended to use <a href="https://spdx.org/licenses/">SPDX License Identifiers</a>.
+     * @return ListProperty for license identifiers.
+     */
     @Optional
     @Input
     public abstract ListProperty<String> getLicenses();
 
+    /**
+     * Contains the contact information for the project as a whole.
+     * This is a string-to-string dictionary. Defined keys include {@code "email"},
+     * {@code "irc"}, {@code "homepage"}, {@code "issues"}, {@code "sources"}.
+     * Mods may provide additional, non-standard keys.
+     * @return MapProperty for project contact information.
+     */
     @Optional
     @Input
     public abstract MapProperty<String, String> getContact();
 
+    /**
+     * Contains an array of nested jars.
+     * Each string points to a path from the mod's root to a nested JAR.
+     * @return ListProperty for paths to nested JARs.
+     */
     @Optional
     @Input
     public abstract ListProperty<String> getJars();
 
+    /**
+     * A string-to-string dictionary, connecting language adapter namespaces to
+     * their Java class implementations.
+     * @return MapProperty for language adapters.
+     */
     @Optional
     @Input
     public abstract MapProperty<String, String> getLanguageAdapters();
 
+    /**
+     * Contains a list of mixin configuration files.
+     * @return ListProperty for mixin configuration file names.
+     */
     @Optional
     @Input
     public abstract ListProperty<String> getMixins();
 
+    /**
+     * Dependencies that cause a hard failure if not met.
+     * A string-to-string map where the key is the mod ID and the value is a version string.
+     * @return MapProperty for "depends" dependencies.
+     */
     @Optional
     @Input
     public abstract MapProperty<String, String> getDepends();
 
+    /**
+     * Dependencies that cause a soft failure (warning) if not met.
+     * A string-to-string map where the key is the mod ID and the value is a version string.
+     * @return MapProperty for "recommends" dependencies.
+     */
     @Optional
     @Input
     public abstract MapProperty<String, String> getRecommends();
 
+    /**
+     * Dependencies that are not matched and are primarily used as metadata.
+     * A string-to-string map where the key is the mod ID and the value is a version string.
+     * @return MapProperty for "suggests" dependencies.
+     */
     @Optional
     @Input
     public abstract MapProperty<String, String> getSuggests();
 
+    /**
+     * Dependencies for which a successful match causes a soft failure (warning).
+     * A string-to-string map where the key is the mod ID and the value is a version string.
+     * @return MapProperty for "conflicts" dependencies.
+     */
     @Optional
     @Input
     public abstract MapProperty<String, String> getConflicts();
 
+    /**
+     * Dependencies for which a successful match causes a hard failure.
+     * A string-to-string map where the key is the mod ID and the value is a version string.
+     * @return MapProperty for "breaks" dependencies.
+     */
     @Optional
     @Input
     public abstract MapProperty<String, String> getBreaks();
 
+    /**
+     * A file path to an access widener file, relative to the mod root.
+     * @return Property for the access widener file path.
+     */
     @Optional
     @Input
     public abstract Property<String> getAccessWidener();
 
+    /**
+     * The path to a single icon file (e.g., "assets/modid/icon.png").
+     * Use this OR {@link #getIconSet()}, but not both. Setting one via DSL methods will clear the other.
+     * If both are somehow set, the task will prioritize {@link #getIconSet()}.
+     *
+     * @return Property for a single icon file path.
+     */
     @Optional
     @Input
     public abstract Property<String> getIconFile();
 
+    /**
+     * A map of icon sizes (as string keys, e.g., "16", "32", "128") to their respective
+     * icon file paths (e.g., "assets/modid/icon16.png").
+     * Use this OR {@link #getIconFile()}. Setting one via DSL methods will clear the other.
+     * This will take precedence over {@link #getIconFile()} if both are non-empty.
+     *
+     * @return MapProperty for an icon set mapping sizes to paths.
+     */
     @Optional
     @Input
     public abstract MapProperty<String, String> getIconSet();
 
+    /**
+     * Provides the configuration for mod entrypoints. This is an optional, nested input object.
+     * <p>
+     * Entrypoints define the initial classes or methods that Fabric Loader will invoke
+     * for different loading stages (e.g., "main", "preLaunch"). Each entrypoint
+     * declaration within the container specifies a value (class or class::member reference)
+     * and an optional language adapter.
+     *
+     * @return Property holding the {@link EntrypointContainerExtension} for configuring entrypoints.
+     * @see FabricExtension#getEntrypoints()
+     * @see EntrypointContainerExtension
+     * @see EntrypointExtension
+     */
     @Optional
     @Nested
     public abstract Property<EntrypointContainerExtension> getEntrypointsContainer();
 
+    /**
+     * A map for any other arbitrary custom fields to be added under the "custom" key in {@code fabric.mod.json}.
+     * <p>
+     * Keys should be strings. Values can be simple types (String, Number, Boolean),
+     * Lists, or Maps, which will be serialized to their JSON equivalents.
+     * It is recommended that custom keys be namespaced (e.g., {@code "yourmodid:yourCustomField": "value"}).
+     * <p>Example in {@code build.gradle.kts}:</p>
+     * <pre>
+     * fabric {
+     *     customData.put("my-mod-id:my-setting", "hello world")
+     *     customData.put("my-mod-id:complex-setting", mapOf("a" to 1, "b" to true))
+     * }
+     * </pre>
+     * @return MapProperty for other custom key-value data.
+     */
     @Optional
     @Input
     public abstract MapProperty<String, Object> getCustomData();
 
-    @Optional
-    @Input
-    public abstract Property<Object> getEnvironment();
-
+    /**
+     * The output file where the generated {@code fabric.mod.json} will be written.
+     * This property is mandatory.
+     * @return RegularFileProperty for the output JSON file.
+     */
     @OutputFile
     public abstract RegularFileProperty getOutputFile();
 
+    /**
+     * Executes the task action.
+     * Performs validation of all configured inputs against the {@code fabric.mod.json} specification.
+     * If validation passes, it constructs the JSON object and writes it to the output file.
+     *
+     * @throws GradleException if validation fails (listing all errors) or if an I/O error occurs.
+     */
     @TaskAction
     public void execute() {
         List<String> validationErrors = new ArrayList<>();
@@ -194,8 +344,6 @@ public abstract class GenerateFabricJsonTask extends DefaultTask {
         validateStringList(errors, getLicenses().getOrElse(Collections.emptyList()), "licenses", false);
 
         validateContactMap(errors, getContact().getOrElse(Collections.emptyMap()), "contact (top-level)");
-
-        validateEnvironment(errors, getEnvironment().getOrNull());
 
         if (getEntrypointsContainer().isPresent()) {
             validateEntrypoints(errors, getEntrypointsContainer().get());

@@ -25,6 +25,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import de.rhm176.silk.accesswidener.*;
 import java.io.*;
+import java.nio.file.Files;
 import java.util.*;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -140,21 +141,18 @@ public abstract class TransformClassesTask extends DefaultTask {
         if (rawRules == null) return organizedRules;
 
         for (AccessWidenerRule rule : rawRules) {
-            String classNameInternal;
+            String classNameInternal = rule.getClassName();;
             AccessModifier modifier = rule.getModifier();
 
             if (rule instanceof ClassAccessWidener classWidener) {
-                classNameInternal = classWidener.getClassName();
                 ProcessedAccessWidener classRules =
                         organizedRules.computeIfAbsent(classNameInternal, k -> new ProcessedAccessWidener());
                 classRules.updateClassModifierWithRule(modifier);
             } else if (rule instanceof MethodAccessWidener methodWidener) {
-                classNameInternal = methodWidener.getClassName();
                 ProcessedAccessWidener classRules =
                         organizedRules.computeIfAbsent(classNameInternal, k -> new ProcessedAccessWidener());
                 classRules.addMethodRule(methodWidener.getMethodName(), methodWidener.getMethodDescriptor(), modifier);
             } else if (rule instanceof FieldAccessWidener fieldWidener) {
-                classNameInternal = fieldWidener.getClassName();
                 ProcessedAccessWidener classRules =
                         organizedRules.computeIfAbsent(classNameInternal, k -> new ProcessedAccessWidener());
                 classRules.addFieldRule(fieldWidener.getFieldName(), fieldWidener.getFieldDescriptor(), modifier);
@@ -376,7 +374,7 @@ public abstract class TransformClassesTask extends DefaultTask {
                         File fmjFile = new File(fmjSourceDescription);
                         File awFile = new File(fmjFile.getParentFile(), awPath);
                         if (awFile.exists() && awFile.isFile()) {
-                            widener = new AccessWidener(awFile);
+                            widener = new AccessWidener(Files.newInputStream(awFile.toPath()), awFile.getAbsolutePath());
                         } else {
                             getLogger()
                                     .warn(

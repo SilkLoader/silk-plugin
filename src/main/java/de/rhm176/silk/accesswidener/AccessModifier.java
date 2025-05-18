@@ -21,9 +21,46 @@
  */
 package de.rhm176.silk.accesswidener;
 
+/**
+ * Defines the types of access modifications that can be applied by an Access Widener rule.
+ * Each modifier has specific effects on classes, methods, or fields as defined by the
+ * Fabric Access Widener specification.
+ *
+ * @see AccessWidenerRule
+ * @see <a href="https://wiki.fabricmc.net/tutorial:accesswideners#access_changes">FabricMC Access Widener Specification - Access Changes</a>
+ */
 public enum AccessModifier {
+    /**
+     * The {@code accessible} modifier is used when you want to access a class, field, or method
+     * from another class.
+     * <ul>
+     * <li><b>Classes:</b> Made {@code public}.</li>
+     * <li><b>Methods:</b> Made {@code public}. If the method was originally {@code private},
+     * it will also be made {@code final}.</li>
+     * <li><b>Fields:</b> Made {@code public}.</li>
+     * </ul>
+     * Making a method or field {@code accessible} also transitively makes its containing class {@code accessible}.
+     */
     ACCESSIBLE("accessible"),
+    /**
+     * The {@code extendable} modifier is used where you want to extend a class or override a method.
+     * <ul>
+     * <li><b>Classes:</b> Made {@code public} and the {@code final} modifier is removed.</li>
+     * <li><b>Methods:</b> Made {@code protected} (if not already {@code public}) and the {@code final}
+     * modifier is removed.</li>
+     * </ul>
+     * Making a method {@code extendable} also transitively makes its containing class {@code extendable}.
+     */
     EXTENDABLE("extendable"),
+    /**
+     * The {@code mutable} modifier is used when you want to mutate a {@code final} field.
+     * <ul>
+     * <li><b>Fields:</b> The {@code final} modifier is removed.</li>
+     * </ul>
+     * This modifier applies only to fields. To make a {@code private final} field both
+     * accessible (e.g., public) and mutable, two separate directives (one {@code accessible}
+     * and one {@code mutable}) are required for that field.
+     */
     MUTABLE("mutable");
 
     private final String id;
@@ -32,10 +69,23 @@ public enum AccessModifier {
         this.id = id;
     }
 
+    /**
+     * Gets the string identifier of this access modifier as used in {@code .accesswidener} files
+     * (e.g., "accessible", "extendable", "mutable").
+     *
+     * @return The string identifier of the modifier.
+     */
     public String getId() {
         return id;
     }
 
+    /**
+     * Retrieves an {@code AccessModifier} enum constant by its string identifier.
+     * This method is case-sensitive.
+     *
+     * @param id The string identifier (e.g., "accessible", "extendable", "mutable").
+     * @return The corresponding {@code AccessModifier} enum constant, or {@code null} if no match is found.
+     */
     public static AccessModifier byId(String id) {
         for (AccessModifier mod : AccessModifier.values()) if (mod.getId().equals(id)) return mod;
 

@@ -23,16 +23,67 @@ package de.rhm176.silk.accesswidener;
 
 import java.util.List;
 
-public abstract class AccessWidenerRule {
-    protected final AccessModifier modifier;
+/**
+ * Abstract base class for all types of Access Widener rules.
+ * <p>
+ * An Access Widener rule defines a requested modification to the accessibility
+ * or finality of a class, method, or field. Each rule consists of an
+ * {@link AccessModifier} (e.g., accessible, extendable, mutable) and details
+ * about the target element.
+ * <p>
+ * Subclasses like {@link ClassAccessWidener}, {@link MethodAccessWidener}, and
+ * {@link FieldAccessWidener} provide concrete implementations for specific target types.
+ *
+ * @see AccessWidener
+ * @see AccessModifier
+ * @see ClassAccessWidener
+ * @see MethodAccessWidener
+ * @see FieldAccessWidener
+ * @see <a href="https://wiki.fabricmc.net/tutorial:accesswideners">FabricMC Access Wideners</a>
+ */
+public sealed abstract class AccessWidenerRule permits ClassAccessWidener, MethodAccessWidener, FieldAccessWidener {
+    private final AccessModifier modifier;
+    private final String className;
 
+    /**
+     * Abstract method to be implemented by subclasses, defining which {@link AccessModifier}s
+     * are applicable to the specific type of rule (class, method, or field).
+     *
+     * @return A list of {@link AccessModifier}s that are permitted for this rule type.
+     */
     public abstract List<AccessModifier> allowedModifiers();
 
-    public AccessWidenerRule(AccessModifier modifier) {
+    /**
+     * Constructs a new AccessWidenerRule.
+     *
+     * @param modifier The {@link AccessModifier} specifying the type of access change
+     * (e.g., {@link AccessModifier#ACCESSIBLE}). Must not be null.
+     * @param className The internal name of the class targeted by this rule or
+     * containing the targeted member (e.g., {@code com/example/MyClass}).
+     * This is expected to use '/' as a package separator. Must not be null.
+     */
+    public AccessWidenerRule(AccessModifier modifier, String className) {
         this.modifier = modifier;
+        this.className = className;
     }
 
+    /**
+     * Gets the {@link AccessModifier} associated with this rule.
+     * This indicates the type of access change requested (e.g., accessible, extendable, mutable).
+     *
+     * @return The {@link AccessModifier} for this rule.
+     */
     public AccessModifier getModifier() {
         return modifier;
+    }
+
+    /**
+     * Gets the internal name of the class targeted by this rule or containing the targeted member.
+     * For example, {@code com/example/MyClass}.
+     *
+     * @return The internal name of the class.
+     */
+    public String getClassName() {
+        return className;
     }
 }

@@ -41,6 +41,16 @@ import org.gradle.api.provider.Property;
  * <a href="https://fabricmc.net/wiki/documentation:fabric_mod_json">fabric.mod.json specification</a>.
  */
 public abstract class FabricExtension {
+    /**
+     * The schema version for the {@code fabric.mod.json} file.
+     * <p>
+     * This field is mandatory and indicates the version of the {@code fabric.mod.json}
+     * format being used. Fabric Loader uses this to correctly interpret the metadata.
+     * The {@link de.rhm176.silk.task.GenerateFabricJsonTask} will use this constant
+     * when generating the file.
+     *
+     * @see <a href="https://fabricmc.net/wiki/documentation:fabric_mod_json#mandatory_fields">fabric.mod.json Mandatory Fields</a>
+     */
     public static final int SCHEMA_VERSION = 1;
 
     private final ObjectFactory objectFactory;
