@@ -202,9 +202,9 @@ public abstract class FabricExtension {
      * <pre>
      * fabric {
      *     entrypoints {
-     *         type("main") { // Corresponds to EntrypointListBuilder
+     *         type("main") {
      *             entry("com.example.MyModMain")
-     *             entry { // Corresponds to EntrypointDeclarationConfig
+     *             entry {
      *                 value.set("com.example.AnotherMain")
      *                 adapter.set("custom")
      *             }

@@ -56,8 +56,6 @@ import org.jetbrains.annotations.NotNull;
  * Main plugin class for Silk, a Gradle plugin to facilitate mod development for Equilinox.
  */
 public class SilkPlugin implements Plugin<Project> {
-    // Fabric Loader requires at least Java 17.
-    private static final int DEFAULT_JAVA_VER = 17;
     /**
      * The main class for the mod loader.
      */
@@ -130,6 +128,7 @@ public class SilkPlugin implements Plugin<Project> {
                     task.getIconSet().set(manifestConfig.getIconSet());
                     task.getEntrypointsContainer().set(manifestConfig.getEntrypoints());
                     task.getCustomData().set(manifestConfig.getCustomData());
+                    task.getShouldVerify().set(extension.getVerifyFabricModJson());
 
                     task.getOutputFile().set(generatedFabricModJsonDir.map(d -> d.file("fabric.mod.json")));
                 });
@@ -466,8 +465,11 @@ public class SilkPlugin implements Plugin<Project> {
                     .file("src/main/resources/fabric.mod.json")
                     .getAsFile();
 
-            SourceSet currentMainSourceSet = evaluatedProject.getExtensions().getByType(JavaPluginExtension.class)
-                    .getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
+            SourceSet currentMainSourceSet = evaluatedProject
+                    .getExtensions()
+                    .getByType(JavaPluginExtension.class)
+                    .getSourceSets()
+                    .getByName(SourceSet.MAIN_SOURCE_SET_NAME);
 
             if (isGenerationEnabled) {
                 currentMainSourceSet.getResources().srcDir(generatedFabricModJsonDir);

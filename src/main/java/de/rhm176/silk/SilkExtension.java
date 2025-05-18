@@ -117,6 +117,7 @@ public abstract class SilkExtension {
     private final ModRegistration modsContainer;
     private final List<Project> registeredSubprojects = new ArrayList<>();
     private final Property<Boolean> generateFabricModJson;
+    private final Property<Boolean> verifyFabricModJson;
 
     /**
      * Cached result of the Equilinox game JAR search.
@@ -140,8 +141,35 @@ public abstract class SilkExtension {
 
         this.fabric = objectFactory.newInstance(FabricExtension.class, objectFactory, project);
         this.generateFabricModJson = objectFactory.property(Boolean.class).convention(false);
+        this.verifyFabricModJson = objectFactory.property(Boolean.class).convention(true);
 
         this.modsContainer = objectFactory.newInstance(ModRegistration.class, project, registeredSubprojects);
+    }
+
+    /**
+     * Controls whether the parameters configured for {@code fabric.mod.json} generation
+     * via the {@link #fabric(Action)} block (which configures {@link FabricExtension})
+     * should be verified for correctness by the {@link de.rhm176.silk.task.GenerateFabricJsonTask}.
+     * <p>
+     * When set to {@code true} (the default), the generation task will perform a series of checks
+     * on the configured values (e.g., for mod ID format, presence of mandatory fields,
+     * validity of certain paths or URLs, etc.) and fail the build if issues are found.
+     * This helps catch common errors early.
+     * <p>
+     * When set to {@code false}, these built-in validations within the
+     * {@code GenerateFabricJsonTask} are skipped. This might be useful in advanced scenarios
+     * or if the user wishes to bypass specific checks, but it increases the risk of generating an
+     * invalid {@code fabric.mod.json} file.
+     * <p>
+     * Note that the verification might not be exhaustive for all possible {@code fabric.mod.json}
+     * specification details (only some things are checked, and only to a specific extent), focusing on common requirements and formats.
+     * The ultimate validation is performed by Fabric Loader at runtime.
+     * <p>
+     *
+     * @return A {@link Property} of {@link Boolean} to enable or disable {@code fabric.mod.json} validation.
+     */
+    public Property<Boolean> getVerifyFabricModJson() {
+        return verifyFabricModJson;
     }
 
     /**

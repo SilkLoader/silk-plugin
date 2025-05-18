@@ -31,12 +31,20 @@ import de.rhm176.silk.extension.FabricExtension;
 import de.rhm176.silk.extension.PersonExtension;
 import java.io.File;
 import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.GradleException;
+import org.gradle.api.Project;
 import org.gradle.api.file.RegularFileProperty;
+import org.gradle.api.plugins.JavaPluginExtension;
 import org.gradle.api.provider.ListProperty;
 import org.gradle.api.provider.MapProperty;
 import org.gradle.api.provider.Property;
@@ -45,11 +53,20 @@ import org.gradle.api.tasks.*;
 public abstract class GenerateFabricJsonTask extends DefaultTask {
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper().enable(SerializationFeature.INDENT_OUTPUT);
 
+    private static final Pattern MOD_ID_PATTERN = Pattern.compile("^[a-z][a-z0-9-_]{1,63}$");
+    private static final Pattern EMAIL_PATTERN = Pattern.compile("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,6}$");
+    private static final Pattern ENTRYPOINT_VALUE_PATTERN = Pattern.compile(
+            "^(\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*(\\.\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*)*)(::\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*)?$");
+    private static final Set<String> VALID_ENVIRONMENTS = Set.of("*", "client", "server");
+
     @Input
     public abstract Property<String> getId();
 
     @Input
     public abstract Property<String> getVersion();
+
+    @Input
+    public abstract Property<Boolean> getShouldVerify();
 
     @Optional
     @Input
@@ -127,75 +144,424 @@ public abstract class GenerateFabricJsonTask extends DefaultTask {
     @Input
     public abstract MapProperty<String, Object> getCustomData();
 
+    @Optional
+    @Input
+    public abstract Property<Object> getEnvironment();
+
     @OutputFile
     public abstract RegularFileProperty getOutputFile();
 
-    private void putIfPresent(ObjectNode node, String fieldName, Property<?> property) {
-        if (property.isPresent()) {
-            Object value = property.get();
-            if (value instanceof String && !((String) value).trim().isEmpty()) {
-                node.put(fieldName, (String) value);
-            } else if (value instanceof Integer) {
-                node.put(fieldName, (Integer) value);
-            } else if (value instanceof Boolean) {
-                node.put(fieldName, (Boolean) value);
+    @TaskAction
+    public void execute() {
+        List<String> validationErrors = new ArrayList<>();
+        if (getShouldVerify().get()) validateAllInputs(validationErrors);
+
+        if (!validationErrors.isEmpty()) {
+            StringBuilder errorMessage = new StringBuilder("Invalid fabric.mod.json configuration:\n");
+            for (String error : validationErrors) {
+                errorMessage.append("  - ").append(error).append("\n");
+            }
+            throw new GradleException(errorMessage.toString());
+        }
+
+        constructAndWriteJson();
+    }
+
+    private void validateAllInputs(List<String> errors) {
+        Project project = getProject();
+        JavaPluginExtension javaExt = project.getExtensions().getByType(JavaPluginExtension.class);
+        SourceSet mainSS = javaExt.getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
+        Set<File> mainResourceDirs = mainSS.getResources().getSrcDirs();
+
+        String id = getId().getOrNull();
+        if (id == null || id.trim().isEmpty()) {
+            errors.add("'id' is mandatory and cannot be empty.");
+        } else if (!MOD_ID_PATTERN.matcher(id).matches()) {
+            errors.add("Invalid 'id': \"" + id + "\". Must match pattern: " + MOD_ID_PATTERN.pattern());
+        }
+
+        String version = getVersion().getOrNull();
+        if (version == null || version.trim().isEmpty()) {
+            errors.add("'version' is mandatory and cannot be empty.");
+        }
+
+        validateOptionalStringProperty(errors, getModName(), "name");
+        validateOptionalStringProperty(errors, getModDescription(), "description");
+
+        validatePersonList(errors, getAuthors().getOrElse(Collections.emptyList()), "authors");
+        validatePersonList(errors, getContributors().getOrElse(Collections.emptyList()), "contributors");
+
+        validateStringList(errors, getLicenses().getOrElse(Collections.emptyList()), "licenses", false);
+
+        validateContactMap(errors, getContact().getOrElse(Collections.emptyMap()), "contact (top-level)");
+
+        validateEnvironment(errors, getEnvironment().getOrNull());
+
+        if (getEntrypointsContainer().isPresent()) {
+            validateEntrypoints(errors, getEntrypointsContainer().get());
+        }
+
+        validateStringList(errors, getJars().getOrElse(Collections.emptyList()), "jars[*].file", false);
+
+        validateStringMap(
+                errors, getLanguageAdapters().getOrElse(Collections.emptyMap()), "languageAdapters", false, false);
+
+        List<String> mixins = getMixins().getOrElse(Collections.emptyList());
+        for (String mixin : mixins) {
+            if (mixin == null || mixin.trim().isEmpty()) {
+                errors.add("Mixin entry cannot be null or empty.");
+            } else if (!mixin.toLowerCase().endsWith(".json")) {
+                errors.add("Mixin entry '" + mixin + "' should be a JSON file path.");
+            }
+        }
+        validateFileResourcePathsList(errors, getMixins(), "mixins", ".json", mainResourceDirs);
+        validateFileResourcePath(errors, getAccessWidener(), "accessWidener", null, mainResourceDirs);
+
+        validateIcon(
+                errors, getIconFile().getOrNull(), getIconSet().getOrElse(Collections.emptyMap()), mainResourceDirs);
+
+        validateDependencyMap(errors, getDepends().getOrElse(Collections.emptyMap()), "depends");
+        validateDependencyMap(errors, getRecommends().getOrElse(Collections.emptyMap()), "recommends");
+        validateDependencyMap(errors, getSuggests().getOrElse(Collections.emptyMap()), "suggests");
+        validateDependencyMap(errors, getConflicts().getOrElse(Collections.emptyMap()), "conflicts");
+        validateDependencyMap(errors, getBreaks().getOrElse(Collections.emptyMap()), "breaks");
+
+        Map<String, Object> customData = getCustomData().getOrElse(Collections.emptyMap());
+        for (Map.Entry<String, Object> entry : customData.entrySet()) {
+            if (entry.getKey() == null || entry.getKey().trim().isEmpty()) {
+                errors.add("Custom data key cannot be null or empty.");
             }
         }
     }
 
-    private void putMapIfPresent(ObjectNode node, String fieldName, MapProperty<String, String> mapProperty) {
-        Map<String, String> map = mapProperty.getOrElse(Collections.emptyMap());
-        if (!map.isEmpty()) {
-            ObjectNode mapNode = node.putObject(fieldName);
-            map.forEach(mapNode::put);
+    private void validateFileResourcePath(
+            List<String> errors,
+            Property<String> pathProperty,
+            String fieldName,
+            String expectedExtension,
+            Set<File> configuredResourceDirs) {
+        if (!pathProperty.isPresent()) return;
+        String path = pathProperty.getOrNull();
+        if (path == null || path.trim().isEmpty()) {
+            errors.add(String.format("Field '%s' path, if explicitly provided, cannot be empty.", fieldName));
+            return;
+        }
+
+        if (expectedExtension != null && !path.toLowerCase().endsWith(expectedExtension.toLowerCase())) {
+            errors.add(String.format("Field '%s' path '%s' must end with '%s'.", fieldName, path, expectedExtension));
+        }
+        validateFileResourcePathContent(errors, path, fieldName, configuredResourceDirs);
+    }
+
+    private void validateFileResourcePathsList(
+            List<String> errors,
+            ListProperty<String> listProperty,
+            String fieldName,
+            String expectedExtension,
+            Set<File> configuredResourceDirs) {
+        if (!listProperty.isPresent()) return;
+        List<String> paths = listProperty.get();
+
+        for (int i = 0; i < paths.size(); i++) {
+            String path = paths.get(i);
+            String itemContext = String.format("Entry #%d ('%s') in '%s' list", i + 1, path, fieldName);
+            if (path == null || path.trim().isEmpty()) {
+                errors.add(String.format("Path entry #%d in '%s' list cannot be null or empty.", i + 1, fieldName));
+                continue;
+            }
+            if (expectedExtension != null && !path.toLowerCase().endsWith(expectedExtension.toLowerCase())) {
+                errors.add(String.format(
+                        "Entry '%s' (at index %d) in '%s' list must end with '%s'.",
+                        path, i, fieldName, expectedExtension));
+            }
+            validateFileResourcePathContent(errors, path, itemContext, configuredResourceDirs);
         }
     }
 
-    private void putListIfPresent(ObjectNode node, String fieldName, ListProperty<String> listProperty) {
-        List<String> list = listProperty.getOrElse(Collections.emptyList());
-        if (!list.isEmpty()) {
-            ArrayNode arrayNode = node.putArray(fieldName);
-            list.forEach(arrayNode::add);
+    private void validateOptionalStringProperty(List<String> errors, Property<String> property, String fieldName) {
+        if (property.isPresent() && (property.get().trim().isEmpty())) {
+            errors.add(String.format("'%s' if present, cannot be empty.", fieldName));
         }
     }
 
-    private void putPersonListIfPresent(
-            ObjectNode node, String fieldName, ListProperty<PersonExtension> personListProperty) {
-        List<PersonExtension> persons = personListProperty.getOrElse(Collections.emptyList());
-        if (!persons.isEmpty()) {
-            ArrayNode arrayNode = node.putArray(fieldName);
-            for (PersonExtension personConfig : persons) {
-                String name = personConfig.getName().getOrNull();
-                if (name == null || name.trim().isEmpty()) continue;
+    private void validateStringList(List<String> errors, List<String> list, String fieldName, boolean allowEmptyList) {
+        if (list == null) return;
 
-                Map<String, String> contactInfo = personConfig.getContact().getOrElse(Collections.emptyMap());
-                if (contactInfo.isEmpty()) {
-                    arrayNode.add(name);
-                } else {
-                    ObjectNode personObject = arrayNode.addObject();
-                    personObject.put("name", name);
-                    ObjectNode contactNode = personObject.putObject("contact");
-                    contactInfo.forEach(contactNode::put);
+        for (int i = 0; i < list.size(); i++) {
+            String item = list.get(i);
+            if (item == null || (!allowEmptyList && item.trim().isEmpty())) {
+                errors.add(String.format("Entry %d in '%s' list cannot be null or empty.", i + 1, fieldName));
+            }
+        }
+    }
+
+    private void validateStringMap(
+            List<String> errors,
+            Map<String, String> map,
+            String fieldName,
+            boolean allowEmptyKeys,
+            boolean allowEmptyValues) {
+        for (Map.Entry<String, String> entry : map.entrySet()) {
+            if (!allowEmptyKeys
+                    && (entry.getKey() == null || entry.getKey().trim().isEmpty())) {
+                errors.add(String.format("Key in '%s' map cannot be null or empty.", fieldName));
+            }
+            if (!allowEmptyValues
+                    && (entry.getValue() == null || entry.getValue().trim().isEmpty())) {
+                errors.add(String.format(
+                        "Value for key '%s' in '%s' map cannot be null or empty.", entry.getKey(), fieldName));
+            }
+        }
+    }
+
+    private void validateDependencyMap(List<String> errors, Map<String, String> map, String fieldName) {
+        for (Map.Entry<String, String> entry : map.entrySet()) {
+            String modId = entry.getKey();
+            String versionRange = entry.getValue();
+            if (modId == null || modId.trim().isEmpty()) {
+                errors.add(String.format("Mod ID (key) in '%s' map cannot be null or empty.", fieldName));
+            }
+            if (versionRange == null || versionRange.trim().isEmpty()) {
+                errors.add(String.format(
+                        "Version range for mod ID '%s' in '%s' map cannot be null or empty.", modId, fieldName));
+            }
+        }
+    }
+
+    private void validatePersonList(List<String> errors, List<PersonExtension> persons, String fieldName) {
+        for (PersonExtension person : persons) {
+            String name = person.getName().getOrNull();
+            if (name == null || name.trim().isEmpty()) {
+                errors.add(String.format("Person 'name' in '%s' list is mandatory and cannot be empty.", fieldName));
+            }
+            validateContactMap(
+                    errors,
+                    person.getContact().getOrElse(Collections.emptyMap()),
+                    fieldName + " entry '" + (name != null ? name : "unknown") + "' contact");
+        }
+    }
+
+    private void validateContactMap(List<String> errors, Map<String, String> contactMap, String context) {
+        for (Map.Entry<String, String> entry : contactMap.entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (value == null || value.trim().isEmpty()) {
+                errors.add(String.format("Contact '%s' in %s cannot have an empty value.", key, context));
+                continue;
+            }
+            try {
+                switch (key.toLowerCase()) {
+                    case "email":
+                        if (!EMAIL_PATTERN.matcher(value).matches()) {
+                            errors.add(String.format("Invalid email format for '%s' in %s: %s", key, context, value));
+                        }
+                        break;
+                    case "irc":
+                        URI ircUri = new URI(value);
+                        if (!"irc".equalsIgnoreCase(ircUri.getScheme())) {
+                            errors.add(String.format(
+                                    "Contact '%s' in %s must be a valid irc:// URL: %s", key, context, value));
+                        }
+                        break;
+                    case "homepage":
+                    case "issues":
+                        URI httpUri = new URI(value);
+                        if (!("http".equalsIgnoreCase(httpUri.getScheme())
+                                || "https".equalsIgnoreCase(httpUri.getScheme()))) {
+                            errors.add(String.format(
+                                    "Contact '%s' in %s must be a valid HTTP/HTTPS URL: %s", key, context, value));
+                        }
+                        break;
+                    case "sources":
+                        new URI(value);
+                        break;
+                }
+            } catch (URISyntaxException e) {
+                errors.add(String.format("Invalid URL format for contact '%s' in %s: %s", key, context, value));
+            }
+        }
+    }
+
+    private void validateEnvironment(List<String> errors, Object environmentObj) {
+        if (environmentObj == null) return;
+
+        if (environmentObj instanceof String envString) {
+            if (!VALID_ENVIRONMENTS.contains(envString)) {
+                errors.add(String.format(
+                        "Invalid 'environment' string value: \"%s\". Must be one of %s.",
+                        envString, VALID_ENVIRONMENTS));
+            }
+        } else if (environmentObj instanceof List) {
+            @SuppressWarnings("unchecked")
+            List<String> envList = (List<String>) environmentObj;
+            if (envList.isEmpty()) {
+                errors.add("'environment' list cannot be empty if provided as a list.");
+            }
+            for (String env : envList) {
+                if (env == null || env.trim().isEmpty() || !VALID_ENVIRONMENTS.contains(env) || env.equals("*")) {
+                    errors.add(String.format(
+                            "Invalid 'environment' list entry: \"%s\". Must be 'client' or 'server'. '*' is not allowed in list form.",
+                            env));
                 }
             }
-            if (arrayNode.isEmpty()) {
-                node.remove(fieldName);
+        } else {
+            errors.add(String.format(
+                    "'environment' must be a String or a List<String>, but was: %s",
+                    environmentObj.getClass().getName()));
+        }
+    }
+
+    private void validateEntrypoints(List<String> errors, EntrypointContainerExtension container) {
+        Map<String, ListProperty<EntrypointExtension>> types =
+                container.getTypes().getOrElse(Collections.emptyMap());
+        for (Map.Entry<String, ListProperty<EntrypointExtension>> entry : types.entrySet()) {
+            String type = entry.getKey();
+            List<EntrypointExtension> declarations = entry.getValue().getOrElse(Collections.emptyList());
+            if (type == null || type.trim().isEmpty()) {
+                errors.add("Entrypoint type (key) cannot be null or empty.");
+            }
+            if (declarations.isEmpty() && container.getTypes().get().containsKey(type)) {
+                errors.add(
+                        String.format("Entrypoint list for type '%s' cannot be empty if the type is declared.", type));
+            }
+            for (int i = 0; i < declarations.size(); i++) {
+                EntrypointExtension decl = declarations.get(i);
+                String value = decl.getValue().getOrNull();
+                if (value == null || value.trim().isEmpty()) {
+                    errors.add(String.format(
+                            "Entrypoint declaration #%d for type '%s' must have a non-empty 'value'.", i + 1, type));
+                } else if (!ENTRYPOINT_VALUE_PATTERN.matcher(value).matches()) {
+                    errors.add(String.format(
+                            "Invalid entrypoint 'value' format for type '%s', declaration #%d: \"%s\". Expected 'com.example.Class' or 'com.example.Class::member'.",
+                            type, i + 1, value));
+                }
+
+                if (decl.getAdapter().isPresent()
+                        && decl.getAdapter().get().trim().isEmpty()) {
+                    errors.add(String.format(
+                            "Entrypoint 'adapter' for type '%s', declaration #%d ('%s') cannot be an empty string if specified; omit or use 'default'.",
+                            type, i + 1, value));
+                }
             }
         }
     }
 
-    @TaskAction
-    public void generate() { // TODO: probably throw error if fabric extension isn't present or null or anything weird
+    private void validateFileResourcePathContent(
+            List<String> errors, String path, String fieldNameForContext, Set<File> resourceDirectories) {
+        if (path == null || path.trim().isEmpty()) {
+            errors.add(String.format("Path for '%s' cannot be null or empty.", fieldNameForContext));
+            return;
+        }
+
+        boolean foundInAnyResourceDir = false;
+        File locatedFile = null;
+
+        for (File resourceDir : resourceDirectories) {
+            if (!resourceDir.isDirectory()) continue;
+
+            File candidateFile = new File(resourceDir, path);
+            if (candidateFile.exists()) {
+                locatedFile = candidateFile;
+                foundInAnyResourceDir = true;
+                break;
+            }
+        }
+
+        if (!foundInAnyResourceDir) {
+            errors.add(String.format(
+                    "Field '%s' references non-existent file: '%s'. Searched in configured resource directories: %s",
+                    fieldNameForContext,
+                    path,
+                    resourceDirectories.stream().map(File::getAbsolutePath).collect(Collectors.joining(", "))));
+            return;
+        }
+
+        if (!locatedFile.isFile()) {
+            errors.add(String.format(
+                    "Field '%s' path '%s' (found at %s) is not a file.",
+                    fieldNameForContext, path, locatedFile.getAbsolutePath()));
+        }
+
+        boolean safelyLocated = false;
+        try {
+            String canonicalLocatedPath = locatedFile.getCanonicalPath();
+            for (File resourceDir : resourceDirectories) {
+                if (resourceDir.isDirectory()) {
+                    String canonicalResourceDirPath = resourceDir.getCanonicalPath();
+                    if (canonicalLocatedPath.startsWith(canonicalResourceDirPath + File.separator)
+                            || canonicalLocatedPath.equals(canonicalResourceDirPath)) {
+                        safelyLocated = true;
+                        break;
+                    }
+                }
+            }
+            if (!safelyLocated) {
+                errors.add(String.format(
+                        "Field '%s' path '%s' (resolved to %s) appears to be outside configured resource directories. Path traversal suspected.",
+                        fieldNameForContext, path, canonicalLocatedPath));
+            }
+        } catch (IOException e) {
+            errors.add(String.format(
+                    "Could not verify canonical path for field '%s' ('%s') due to an error: %s",
+                    fieldNameForContext, path, e.getMessage()));
+        }
+    }
+
+    private void validateIcon(
+            List<String> errors, String iconFile, Map<String, String> iconSet, Set<File> resourceDirectories) {
+        boolean iconFilePresent = iconFile != null && !iconFile.trim().isEmpty();
+        boolean iconSetPresent = !iconSet.isEmpty();
+
+        if (iconFilePresent && iconSetPresent) {
+            errors.add("Both 'iconFile' and 'iconSet' are defined. Please use only one.");
+        }
+
+        if (iconSetPresent) {
+            for (Map.Entry<String, String> entry : iconSet.entrySet()) {
+                String sizeKey = entry.getKey();
+                String path = entry.getValue();
+                if (sizeKey == null || sizeKey.trim().isEmpty()) {
+                    errors.add("Icon set key (size) cannot be null or empty.");
+                } else {
+                    try {
+                        Integer.parseInt(sizeKey);
+                    } catch (NumberFormatException e) {
+                        errors.add("Icon set key (size) '" + sizeKey + "' must be a number string.");
+                    }
+                }
+
+                if (path == null || path.trim().isEmpty()) {
+                    errors.add("Icon set path for size '" + sizeKey + "' cannot be null or empty.");
+                } else {
+                    if (!path.toLowerCase().endsWith(".png")) {
+                        errors.add("Icon set path for size '" + sizeKey + "' ('" + path + "') must be a .png file.");
+                    }
+                    validateFileResourcePathContent(
+                            errors, path, "icon set (size " + sizeKey + ")", resourceDirectories);
+                }
+            }
+        } else if (iconFilePresent) {
+            if (!iconFile.toLowerCase().endsWith(".png")) {
+                errors.add("Icon file path '" + iconFile + "' must be a .png file.");
+            }
+            validateFileResourcePathContent(errors, iconFile, "iconFile", resourceDirectories);
+        }
+    }
+
+    private void constructAndWriteJson() {
         ObjectNode rootNode = OBJECT_MAPPER.createObjectNode();
 
         rootNode.put("schemaVersion", FabricExtension.SCHEMA_VERSION);
         rootNode.put("id", getId().get());
         rootNode.put("version", getVersion().get());
+
         rootNode.put("environment", "*");
 
         if (getEntrypointsContainer().isPresent()) {
+            EntrypointContainerExtension entrypointsContainer =
+                    getEntrypointsContainer().get();
             Map<String, ListProperty<EntrypointExtension>> entrypointTypes =
-                    getEntrypointsContainer().get().getTypes().getOrElse(Collections.emptyMap());
+                    entrypointsContainer.getTypes().getOrElse(Collections.emptyMap());
             if (!entrypointTypes.isEmpty()) {
                 ObjectNode entrypointsRootNode = rootNode.putObject("entrypoints");
                 entrypointTypes.forEach((type, declarationsListProperty) -> {
@@ -204,9 +570,7 @@ public abstract class GenerateFabricJsonTask extends DefaultTask {
                     if (!declarations.isEmpty()) {
                         ArrayNode typeArrayNode = entrypointsRootNode.putArray(type);
                         for (EntrypointExtension decl : declarations) {
-                            String value = decl.getValue().getOrNull();
-                            if (value == null || value.trim().isEmpty()) continue;
-
+                            String value = decl.getValue().get();
                             String adapter = decl.getAdapter().getOrNull();
                             if (adapter != null && !adapter.trim().isEmpty() && !adapter.equals("default")) {
                                 ObjectNode entryObject = typeArrayNode.addObject();
@@ -215,9 +579,6 @@ public abstract class GenerateFabricJsonTask extends DefaultTask {
                             } else {
                                 typeArrayNode.add(value);
                             }
-                        }
-                        if (typeArrayNode.isEmpty()) {
-                            entrypointsRootNode.remove(type);
                         }
                     }
                 });
@@ -267,18 +628,106 @@ public abstract class GenerateFabricJsonTask extends DefaultTask {
             rootNode.put("icon", iconFile);
         }
 
-        Map<String, Object> otherCustomData = getCustomData().getOrElse(Collections.emptyMap());
-        if (!otherCustomData.isEmpty()) {
+        Map<String, Object> customData = getCustomData().getOrElse(Collections.emptyMap());
+        if (!customData.isEmpty()) {
             ObjectNode customNode = rootNode.putObject("custom");
-
-            otherCustomData.forEach(customNode::putPOJO);
+            customData.forEach(customNode::putPOJO);
         }
 
         File outputFile = getOutputFile().get().getAsFile();
+        File parentDir = outputFile.getParentFile();
+        if (parentDir != null && !parentDir.exists()) {
+            if (!parentDir.mkdirs()) {
+                throw new GradleException(
+                        "Could not create output directory for generated fabric.mod.json: " + parentDir);
+            }
+        }
         try {
             OBJECT_MAPPER.writeValue(outputFile, rootNode);
+            getLogger()
+                    .lifecycle(
+                            "Successfully generated fabric.mod.json with validated data at: {}",
+                            outputFile.getAbsolutePath());
         } catch (IOException e) {
-            throw new GradleException("Failed to write fabric.mod.json", e);
+            throw new GradleException("Failed to write fabric.mod.json to " + outputFile.getAbsolutePath(), e);
+        }
+    }
+
+    private void putIfPresent(ObjectNode node, String fieldName, Property<?> property) {
+        if (property.isPresent()) {
+            Object value = property.get();
+            if (value instanceof String) {
+                if (!((String) value).trim().isEmpty()) node.put(fieldName, (String) value);
+            } else if (value instanceof Integer) {
+                node.put(fieldName, (Integer) value);
+            } else if (value instanceof Boolean) {
+                node.put(fieldName, (Boolean) value);
+            }
+        }
+    }
+
+    private void putMapIfPresent(ObjectNode node, String fieldName, MapProperty<String, String> mapProperty) {
+        Map<String, String> map = mapProperty.getOrElse(Collections.emptyMap());
+        if (!map.isEmpty()) {
+            ObjectNode mapNode = node.putObject(fieldName);
+            map.forEach((k, v) -> {
+                if (k != null && !k.trim().isEmpty() && v != null && !v.trim().isEmpty()) {
+                    mapNode.put(k, v);
+                }
+            });
+            if (mapNode.isEmpty()) {
+                node.remove(fieldName);
+            }
+        }
+    }
+
+    private void putListIfPresent(ObjectNode node, String fieldName, ListProperty<String> listProperty) {
+        List<String> list = listProperty.getOrElse(Collections.emptyList());
+        if (!list.isEmpty()) {
+            ArrayNode arrayNode = node.putArray(fieldName);
+            list.forEach(item -> {
+                if (item != null && !item.trim().isEmpty()) {
+                    arrayNode.add(item);
+                }
+            });
+            if (arrayNode.isEmpty()) {
+                node.remove(fieldName);
+            }
+        }
+    }
+
+    private void putPersonListIfPresent(
+            ObjectNode node, String fieldName, ListProperty<PersonExtension> personListProperty) {
+        List<PersonExtension> persons = personListProperty.getOrElse(Collections.emptyList());
+        if (!persons.isEmpty()) {
+            ArrayNode arrayNode = node.putArray(fieldName);
+            for (PersonExtension personConfig : persons) {
+                String name = personConfig.getName().getOrNull();
+                if (name == null || name.trim().isEmpty()) continue;
+
+                Map<String, String> contactInfo = personConfig.getContact().getOrElse(Collections.emptyMap());
+                if (contactInfo.isEmpty()) {
+                    arrayNode.add(name);
+                } else {
+                    ObjectNode personObject = arrayNode.addObject();
+                    personObject.put("name", name);
+                    ObjectNode contactNode = personObject.putObject("contact");
+                    contactInfo.forEach((k, v) -> {
+                        if (k != null
+                                && !k.trim().isEmpty()
+                                && v != null
+                                && !v.trim().isEmpty()) {
+                            contactNode.put(k, v);
+                        }
+                    });
+                    if (contactNode.isEmpty()) {
+                        personObject.remove("contact");
+                    }
+                }
+            }
+            if (arrayNode.isEmpty()) {
+                node.remove(fieldName);
+            }
         }
     }
 }
