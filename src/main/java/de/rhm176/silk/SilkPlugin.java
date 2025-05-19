@@ -410,17 +410,18 @@ public class SilkPlugin implements Plugin<Project> {
 
             TaskProvider<Jar> jarTaskProvider = project.getTasks().named("jar", Jar.class);
             Provider<RegularFile> modJarFileProvider = jarTaskProvider.flatMap(Jar::getArchiveFile);
+            Provider<File> gameJarProvider = transformGameClassesTaskProvider.get().getOutputTransformedJar().getAsFile();
 
             task.jvmArgs(
                     "-Dfabric.development=true",
                     "-Deqmodloader.loadedNatives=true",
                     "-Dfabric.gameJarPath="
-                            + extension.getGameJar().get().getAsFile().toPath().toAbsolutePath(),
+                            + gameJarProvider.get().toPath().toAbsolutePath(),
                     "-Djava.library.path="
                             + nativesDir.get().getAsFile().toPath().toAbsolutePath());
 
             task.classpath(
-                    extension.getGameJar(),
+                    gameJarProvider,
                     modJarFileProvider,
                     project.getConfigurations().getByName(JavaPlugin.RUNTIME_CLASSPATH_CONFIGURATION_NAME));
 
@@ -438,10 +439,6 @@ public class SilkPlugin implements Plugin<Project> {
                     }
                 }
 
-                if (!extension.getGameJar().isPresent()) {
-                    throw new GradleException("Silk extension 'gameJar' must be set in the silk { ... } block.");
-                }
-
                 task.getMainClass().set(LOADER_MAIN_CLASS);
             });
         });
@@ -449,8 +446,8 @@ public class SilkPlugin implements Plugin<Project> {
         project.getDependencies()
                 .addProvider(
                         JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME,
-                        extension.getGameJar().flatMap(gameJarRegularFile -> {
-                            File gameJarAsIoFile = gameJarRegularFile.getAsFile();
+                        transformGameClassesTaskProvider.flatMap(TransformClassesTask::getOutputTransformedJar).flatMap(jar -> {
+                            File gameJarAsIoFile = jar.getAsFile();
                             if (gameJarAsIoFile.exists()) {
                                 return project.provider(() -> project.files(gameJarAsIoFile.getAbsolutePath()));
                             } else {
