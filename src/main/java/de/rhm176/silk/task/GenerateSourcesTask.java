@@ -216,17 +216,6 @@ public abstract class GenerateSourcesTask extends DefaultTask {
         Map<String, String> mergedArgs = new LinkedHashMap<>();
 
         List<String> defaultArgs = new ArrayList<>();
-        defaultArgs.add("-dgs=1"); // Decompile Generic Signatures
-        defaultArgs.add("-hdc=0"); // Hide empty super invocation
-        defaultArgs.add("-rbr=0"); // Remove Bridge Methods
-        defaultArgs.add("-asc=1"); // Encode non-ASCII characters
-        defaultArgs.add("-hes=0"); // Hide empty static initializers
-        defaultArgs.add("-din=1"); // Decompile inner classes
-        defaultArgs.add("-dc4=1"); // Decompile Class References
-        defaultArgs.add("-uto=1"); // Use LVT Names for parameters if available
-        defaultArgs.add("-udv=1"); // Use LVT Names for local variables if available
-        defaultArgs.add("-ump=1"); // Use mixed case parameter names
-        defaultArgs.add("-vac=1"); // Verify anonymous classes
         defaultArgs.add("-log=WARN"); // Set default log level
 
         for (String arg : defaultArgs) {
