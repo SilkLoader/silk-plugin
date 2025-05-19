@@ -142,14 +142,13 @@ public class SilkPlugin implements Plugin<Project> {
                     task.setDescription("Adds synthetic interfaces to game classes for API exposure.");
                     task.setGroup(null);
 
-                    // this should make it work for generated fabric.mod.json's aswell
-                    task.dependsOn(processResourcesTask);
+                    for (Project subProject : extension.getRegisteredSubprojectsInternal()) {
+                        task.dependsOn(subProject.getTasksByName("modifyFabricModJson", false));
+                    }
 
                     task.getInputJar().set(extension.getGameJar());
 
-                    Provider<RegularFile> currentProjectModJsonProvider = project.getLayout()
-                            .file(processResourcesTask.map(
-                                    prTask -> new File(prTask.getDestinationDir(), "fabric.mod.json")));
+                    Provider<RegularFile> currentProjectModJsonProvider = generateFabricModJson.flatMap(GenerateFabricJsonTask::getOutputFile);
                     task.getModConfigurationSources()
                             .from(currentProjectModJsonProvider
                                     .map(RegularFile::getAsFile)
@@ -163,7 +162,6 @@ public class SilkPlugin implements Plugin<Project> {
                             String subProcessResourcesTaskName = subMainSS.getProcessResourcesTaskName();
 
                             if (subProject.getTasks().getNames().contains(subProcessResourcesTaskName)) {
-                                task.getLogger().debug("in mich rein");
                                 TaskProvider<ProcessResources> subProcessResourcesTask = subProject
                                         .getTasks()
                                         .named(subProcessResourcesTaskName, ProcessResources.class);
@@ -221,8 +219,6 @@ public class SilkPlugin implements Plugin<Project> {
         project.getTasks().register("genSources", GenerateSourcesTask.class, task -> {
             task.setGroup("Silk");
             task.setDescription("Decompiles the game JAR using Vineflower to produce a sources JAR.");
-
-            task.dependsOn(transformGameClassesTaskProvider);
 
             task.getInputJar()
                     .set(transformGameClassesTaskProvider.flatMap(TransformClassesTask::getOutputTransformedJar));
@@ -447,15 +443,21 @@ public class SilkPlugin implements Plugin<Project> {
             });
         });
 
-        Provider<RegularFile> outputTransformedJarProvider = transformGameClassesTaskProvider
-                .flatMap(TransformClassesTask::getOutputTransformedJar);
-
-        FileCollection transformedJarAsFileCollection = project.files(outputTransformedJarProvider);
-
-        project.getDependencies().add(
-                JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME,
-                transformedJarAsFileCollection
-        );
+        project.getDependencies()
+                .addProvider(
+                        JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME,
+                        extension.getGameJar().flatMap(gameJarRegularFile -> {
+                            File gameJarAsIoFile = gameJarRegularFile.getAsFile();
+                            Provider<RegularFile> transformedGameJar = transformGameClassesTaskProvider
+                                    .flatMap(TransformClassesTask::getOutputTransformedJar);
+                            if (transformedGameJar.isPresent() && transformedGameJar.get().getAsFile().exists()) {
+                                return project.provider(() -> project.files(transformedGameJar.get().getAsFile().getAbsolutePath()));
+                            } else if (gameJarAsIoFile.exists()) {
+                                return project.provider(() -> project.files(gameJarAsIoFile.getAbsolutePath()));
+                            } else {
+                                return project.provider(project::files);
+                            }
+                        }));
 
         project.afterEvaluate(evaluatedProject -> {
             SilkExtension currentExtension = evaluatedProject.getExtensions().getByType(SilkExtension.class);
