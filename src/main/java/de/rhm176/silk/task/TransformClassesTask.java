@@ -116,17 +116,6 @@ public abstract class TransformClassesTask extends DefaultTask {
     public abstract ConfigurableFileCollection getModConfigurationSources();
 
     /**
-     * The Access Widener file to apply.
-     * If provided, its rules will be applied to the classes in the input JAR.
-     *
-     * @return A {@link RegularFileProperty} for the Access Widener file.
-     */
-    @Optional
-    @InputFile
-    @PathSensitive(PathSensitivity.RELATIVE)
-    public abstract RegularFileProperty getAccessWidenerFile();
-
-    /**
      * The output JAR file where the transformed classes and all other original entries will be stored.
      *
      * @return A {@link RegularFileProperty} for the output transformed JAR.
