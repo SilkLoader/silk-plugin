@@ -405,6 +405,8 @@ public class SilkPlugin implements Plugin<Project> {
             task.setGroup("Silk");
             task.setDescription("Runs the game.");
 
+            task.dependsOn(transformGameClassesTaskProvider);
+
             File runDir = extension.getRunDir().getAsFile().get();
             task.setWorkingDir(runDir);
 
@@ -445,19 +447,15 @@ public class SilkPlugin implements Plugin<Project> {
             });
         });
 
-        project.getDependencies()
-                .addProvider(
-                        JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME,
-                        transformGameClassesTaskProvider
-                                .flatMap(TransformClassesTask::getOutputTransformedJar)
-                                .flatMap(jar -> {
-                                    File gameJarAsIoFile = jar.getAsFile();
-                                    if (gameJarAsIoFile.exists()) {
-                                        return project.provider(() -> project.files(gameJarAsIoFile.getAbsolutePath()));
-                                    } else {
-                                        return project.provider(project::files);
-                                    }
-                                }));
+        Provider<RegularFile> outputTransformedJarProvider = transformGameClassesTaskProvider
+                .flatMap(TransformClassesTask::getOutputTransformedJar);
+
+        FileCollection transformedJarAsFileCollection = project.files(outputTransformedJarProvider);
+
+        project.getDependencies().add(
+                JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME,
+                transformedJarAsFileCollection
+        );
 
         project.afterEvaluate(evaluatedProject -> {
             SilkExtension currentExtension = evaluatedProject.getExtensions().getByType(SilkExtension.class);
