@@ -410,13 +410,15 @@ public class SilkPlugin implements Plugin<Project> {
 
             TaskProvider<Jar> jarTaskProvider = project.getTasks().named("jar", Jar.class);
             Provider<RegularFile> modJarFileProvider = jarTaskProvider.flatMap(Jar::getArchiveFile);
-            Provider<File> gameJarProvider = transformGameClassesTaskProvider.get().getOutputTransformedJar().getAsFile();
+            Provider<File> gameJarProvider = transformGameClassesTaskProvider
+                    .get()
+                    .getOutputTransformedJar()
+                    .getAsFile();
 
             task.jvmArgs(
                     "-Dfabric.development=true",
                     "-Deqmodloader.loadedNatives=true",
-                    "-Dfabric.gameJarPath="
-                            + gameJarProvider.get().toPath().toAbsolutePath(),
+                    "-Dfabric.gameJarPath=" + gameJarProvider.get().toPath().toAbsolutePath(),
                     "-Djava.library.path="
                             + nativesDir.get().getAsFile().toPath().toAbsolutePath());
 
@@ -446,14 +448,16 @@ public class SilkPlugin implements Plugin<Project> {
         project.getDependencies()
                 .addProvider(
                         JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME,
-                        transformGameClassesTaskProvider.flatMap(TransformClassesTask::getOutputTransformedJar).flatMap(jar -> {
-                            File gameJarAsIoFile = jar.getAsFile();
-                            if (gameJarAsIoFile.exists()) {
-                                return project.provider(() -> project.files(gameJarAsIoFile.getAbsolutePath()));
-                            } else {
-                                return project.provider(project::files);
-                            }
-                        }));
+                        transformGameClassesTaskProvider
+                                .flatMap(TransformClassesTask::getOutputTransformedJar)
+                                .flatMap(jar -> {
+                                    File gameJarAsIoFile = jar.getAsFile();
+                                    if (gameJarAsIoFile.exists()) {
+                                        return project.provider(() -> project.files(gameJarAsIoFile.getAbsolutePath()));
+                                    } else {
+                                        return project.provider(project::files);
+                                    }
+                                }));
 
         project.afterEvaluate(evaluatedProject -> {
             SilkExtension currentExtension = evaluatedProject.getExtensions().getByType(SilkExtension.class);
