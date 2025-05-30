@@ -24,26 +24,56 @@
 1.  **Apply the Plugin:**
     Add the Silk Gradle Plugin to your `build.gradle.kts` (Kotlin DSL) or `build.gradle` (Groovy DSL).
 
-    **Kotlin DSL (`build.gradle.kts`):**
+    **Kotlin DSL (`build.gradle.kts`/`settings.gradle.kts`):**
     ```kotlin
     plugins {
         id("de.rhm176.silk") version "<version>"
     }
     ```
+    ```kotlin
+    pluginManagement {
+        resolutionStrategy {
+            eachPlugin {
+                requested.apply {
+                    if ("$id" == "de.rhm176.silk") {
+                        useModule("com.github.SilkLoader:silk-plugin:v$version")
+                    }
+                }
+            }
+        }
+    
+        repositories {
+            maven("https://jitpack.io")
+            gradlePluginPortal()
+        }
+    }
+    ```
 
-    **Groovy DSL (`build.gradle`):**
+    **Groovy DSL (`build.gradle`/`settings.gradle`):**
     ```groovy
     plugins {
         id 'de.rhm176.silk' version '<version>'
     }
     ```
+    ```groovy
+    pluginManagement {
+        resolutionStrategy {
+            eachPlugin {
+                if (requested.id.name == 'de.rhm176.silk') { // or requested.id.toString() == 'de.rhm176.silk'
+                    useModule("com.github.SilkLoader:silk-plugin:v${requested.version}")
+                }
+            }
+        }
+    
+        repositories {
+            maven {
+                url 'https://jitpack.io'
+            }
+            gradlePluginPortal()
+        }
+    }
+    ```
     *(Note: Replace `<version>` with the version of the Silk Gradle Plugin you want to use. You can see all available versions on JitPack.)*
-2.  **Repositories (Handled by Plugin):**
-    The plugin will automatically attempt to add the following repositories if they aren't already configured:
-    * Maven Central (`https://repo.maven.apache.org/maven2`)
-    * FabricMC (`https://maven.fabricmc.net/`)
-    * JitPack (`https://jitpack.io`)
-      You can still declare them explicitly if preferred or if you need other custom repositories.
 
 ## Configuration
 
