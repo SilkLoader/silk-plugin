@@ -23,6 +23,7 @@ package de.rhm176.silk.task;
 
 import java.io.*;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.Enumeration;
 import java.util.jar.JarEntry;
 import java.util.jar.JarFile;
@@ -114,15 +115,9 @@ public abstract class ExtractNativesTask extends DefaultTask {
                 throw new GradleException(
                         "Natives output directory is a file, not a directory: " + nativesDir.getAbsolutePath());
             }
-            try {
-                Files.walk(nativesDir.toPath())
-                        .filter(p -> !p.equals(nativesDir.toPath()))
-                        .map(java.nio.file.Path::toFile)
-                        .sorted((o1, o2) -> -o1.compareTo(o2))
-                        .forEach(File::delete);
-            } catch (IOException e) {
-                throw new GradleException("Failed to clear natives directory: " + nativesDir.getAbsolutePath(), e);
-            }
+
+            getProject().delete(nativesDir);
+            nativesDir.mkdirs();
         } else {
             if (!nativesDir.mkdirs()) {
                 throw new GradleException("Could not create natives directory: " + nativesDir.getAbsolutePath());
@@ -131,7 +126,6 @@ public abstract class ExtractNativesTask extends DefaultTask {
 
         try (JarFile jarFile = new JarFile(jar, false)) {
             Enumeration<JarEntry> entries = jarFile.entries();
-            int extractedCount = 0;
 
             while (entries.hasMoreElements()) {
                 JarEntry entry = entries.nextElement();
@@ -139,17 +133,9 @@ public abstract class ExtractNativesTask extends DefaultTask {
                         && !entry.getName().contains("/")
                         && !entry.getName().contains("\\")
                         && isNativeFile(entry.getName(), getOsName().get())) {
-
-                    File outputFile = new File(nativesDir, entry.getName());
-                    try (InputStream in = jarFile.getInputStream(entry);
-                            OutputStream out = new FileOutputStream(outputFile)) {
-                        byte[] buffer = new byte[8192];
-                        int bytesRead;
-                        while ((bytesRead = in.read(buffer)) != -1) {
-                            out.write(buffer, 0, bytesRead);
-                        }
-                        extractedCount++;
-                        getLogger().debug("Silk: Extracted native file: {}", entry.getName());
+                    try (InputStream in = jarFile.getInputStream(entry)) {
+                        Files.copy(
+                                in, nativesDir.toPath().resolve(entry.getName()), StandardCopyOption.REPLACE_EXISTING);
                     } catch (IOException e) {
                         throw new GradleException("Failed to extract native file: " + entry.getName(), e);
                     }

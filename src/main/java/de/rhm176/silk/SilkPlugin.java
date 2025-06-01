@@ -21,21 +21,11 @@
  */
 package de.rhm176.silk;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import de.rhm176.silk.extension.FabricExtension;
-import de.rhm176.silk.task.ExtractNativesTask;
-import de.rhm176.silk.task.GenerateFabricJsonTask;
-import de.rhm176.silk.task.GenerateSourcesTask;
-import de.rhm176.silk.task.TransformClassesTask;
+import de.rhm176.silk.task.*;
 import java.io.File;
 import java.io.IOException;
 import java.net.URI;
-import java.nio.file.Files;
-import java.nio.file.StandardCopyOption;
 import java.util.*;
 import java.util.jar.Attributes;
 import java.util.jar.JarFile;
@@ -62,8 +52,6 @@ import org.jetbrains.annotations.NotNull;
  */
 public class SilkPlugin implements Plugin<Project> {
     private static final String FABRIC_MAVEN_URL = "https://maven.fabricmc.net/";
-    private static final String MAVEN_CENTRAL_URL1 = "https://repo.maven.apache.org/maven2";
-    private static final String MAVEN_CENTRAL_URL2 = "https://repo1.maven.org/maven2";
     private static final String JITPACK_MAVEN_URL = "https://jitpack.io";
 
     /**
@@ -93,7 +81,6 @@ public class SilkPlugin implements Plugin<Project> {
 
         project.getConfigurations().named(JavaPlugin.IMPLEMENTATION_CONFIGURATION_NAME, conf -> {
             conf.getDependencies().addLater(extension.getSilkLoaderCoordinates().map(coords -> {
-                if (coords == null) return null;
                 if (coords instanceof CharSequence && coords.toString().trim().isEmpty()) return null;
                 return project.getDependencies().create(coords);
             }));
@@ -102,12 +89,6 @@ public class SilkPlugin implements Plugin<Project> {
         Provider<File> loaderJarFileProvider = extension
                 .getSilkLoaderCoordinates()
                 .flatMap(coords -> {
-                    if (coords == null) {
-                        project.getLogger()
-                                .info("Silk: silkLoaderCoordinates is null. No loader JAR will be configured from it.");
-                        return project.provider(() -> null);
-                    }
-
                     if (coords instanceof CharSequence
                             && coords.toString().trim().isEmpty()) {
                         project.getLogger()
@@ -157,7 +138,8 @@ public class SilkPlugin implements Plugin<Project> {
                                         coords,
                                         dependency,
                                         resolvedFiles.stream()
-                                                .map(fsl -> fsl.getAsFile().getName())
+                                                .map(FileSystemLocation::getAsFile)
+                                                .map(File::getName)
                                                 .collect(Collectors.toList()));
                         return null;
                     });
@@ -236,6 +218,43 @@ public class SilkPlugin implements Plugin<Project> {
         Configuration compileClasspath =
                 project.getConfigurations().getByName(JavaPlugin.COMPILE_CLASSPATH_CONFIGURATION_NAME);
 
+        TaskProvider<ModifyFabricModJsonTask> modifyFabricModJsonTask = project.getTasks()
+                .register("modifyFabricModJson", ModifyFabricModJsonTask.class, task -> {
+                    task.setGroup(null);
+                    task.setDescription("Adds bundled submod JAR references to fabric.mod.json.");
+
+                    Provider<RegularFile> fabricModJsonFileLocation = project.getLayout()
+                            .file(processResourcesTask.map(
+                                    prTask -> new File(prTask.getDestinationDir(), "fabric.mod.json")));
+
+                    task.getInputJsonFile().set(fabricModJsonFileLocation);
+                    task.getOutputJsonFile().set(fabricModJsonFileLocation);
+
+                    Provider<List<String>> bundledJarNamesProvider =
+                            project.provider(() -> extension.getRegisteredSubprojectsInternal().stream()
+                                    .map(subProject -> {
+                                        try {
+                                            return subProject
+                                                    .getTasks()
+                                                    .named("jar", Jar.class)
+                                                    .flatMap(Jar::getArchiveFileName)
+                                                    .getOrNull();
+                                        } catch (UnknownTaskException e) {
+                                            project.getLogger()
+                                                    .warn(
+                                                            "Silk: Subproject '{}' does not have a 'jar' task of type Jar. "
+                                                                    + "Cannot determine its archive name for fabric.mod.json.",
+                                                            subProject.getPath());
+                                            return null;
+                                        }
+                                    })
+                                    .filter(Objects::nonNull)
+                                    .collect(Collectors.toList()));
+                    task.getBundledJarNames().set(bundledJarNamesProvider);
+
+                    task.dependsOn(processResourcesTask);
+                });
+
         TaskProvider<TransformClassesTask> transformGameClassesTaskProvider = project.getTasks()
                 .register("transformGameClasses", TransformClassesTask.class, task -> {
                     task.setGroup(null);
@@ -243,7 +262,7 @@ public class SilkPlugin implements Plugin<Project> {
                     for (Project subProject : extension.getRegisteredSubprojectsInternal()) {
                         task.dependsOn(subProject.getTasksByName("modifyFabricModJson", false));
                     }
-                    task.dependsOn(project.getTasksByName("modifyFabricModJson", false));
+                    task.dependsOn(modifyFabricModJsonTask);
 
                     task.getInputJar().set(extension.getGameJar());
 
@@ -267,12 +286,7 @@ public class SilkPlugin implements Plugin<Project> {
                                         .getLayout()
                                         .file(subProcessResourcesTask.map(
                                                 prTask -> new File(prTask.getDestinationDir(), "fabric.mod.json")));
-                                Provider<File> subModJsonFileProvider = subModJsonProvider
-                                        .map(RegularFile::getAsFile)
-                                        .filter(File::exists);
-                                if (subModJsonFileProvider.isPresent()) {
-                                    task.getModConfigurationSources().from(subModJsonFileProvider);
-                                }
+                                task.getModConfigurationSources().from(subModJsonProvider);
                             } else {
                                 project.getLogger()
                                         .warn(
@@ -361,120 +375,6 @@ public class SilkPlugin implements Plugin<Project> {
             return project.files(jarTaskOutputs);
         });
 
-        TaskProvider<Task> modifyFabricModJsonTask = project.getTasks().register("modifyFabricModJson", task -> {
-            task.setGroup(null);
-            task.setDescription("Adds bundled submod JAR references to fabric.mod.json.");
-
-            DirectoryProperty resourcesOutputDir = project.getObjects().directoryProperty();
-            resourcesOutputDir.set(
-                    project.getLayout().dir(processResourcesTask.map(ProcessResources::getDestinationDir)));
-            task.getInputs().dir(resourcesOutputDir).withPathSensitivity(PathSensitivity.RELATIVE);
-
-            Provider<List<String>> bundledJarNamesProvider =
-                    project.provider(() -> extension.getRegisteredSubprojectsInternal().stream()
-                            .map(subProject -> {
-                                try {
-                                    return subProject
-                                            .getTasks()
-                                            .named("jar", Jar.class)
-                                            .flatMap(Jar::getArchiveFileName)
-                                            .getOrNull();
-                                } catch (UnknownTaskException e) {
-                                    project.getLogger()
-                                            .warn(
-                                                    "Silk: Subproject '{}' does not have a 'jar' task of type Jar. Cannot determine its archive name for fabric.mod.json.",
-                                                    subProject.getPath());
-                                    return null;
-                                }
-                            })
-                            .filter(Objects::nonNull)
-                            .collect(Collectors.toList()));
-            task.getInputs().property("bundledJarNames", bundledJarNamesProvider);
-
-            task.dependsOn(processResourcesTask);
-
-            RegularFileProperty outputFabricModJsonFile = project.getObjects().fileProperty();
-            outputFabricModJsonFile.set(resourcesOutputDir.file("fabric.mod.json"));
-            task.getOutputs().file(outputFabricModJsonFile).withPropertyName("modifiedFabricModJson");
-
-            task.doLast(t -> {
-                File fabricModJsonFile = outputFabricModJsonFile.get().getAsFile();
-                List<String> bundledJarFileNames = bundledJarNamesProvider.get();
-
-                if (!fabricModJsonFile.exists() || bundledJarFileNames.isEmpty()) {
-                    return;
-                }
-
-                ObjectMapper objectMapper = new ObjectMapper();
-                objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
-
-                try {
-                    JsonNode rootNode = objectMapper.readTree(fabricModJsonFile);
-                    if (!rootNode.isObject()) {
-                        t.getLogger()
-                                .error(
-                                        "Silk: fabric.mod.json content is not a JSON object. Path: {}",
-                                        fabricModJsonFile.getAbsolutePath());
-                        return;
-                    }
-                    ObjectNode objectNode = (ObjectNode) rootNode;
-
-                    ArrayNode jarsArrayNode;
-                    if (objectNode.has("jars")) {
-                        JsonNode jarsField = objectNode.get("jars");
-                        if (jarsField.isArray()) {
-                            jarsArrayNode = (ArrayNode) jarsField;
-                        } else {
-                            t.getLogger()
-                                    .warn(
-                                            "Silk: 'jars' field in fabric.mod.json is present but not an array. It will be overwritten with a new array including bundled mods.");
-                            jarsArrayNode = objectMapper.createArrayNode();
-                            objectNode.set("jars", jarsArrayNode);
-                        }
-                    } else {
-                        jarsArrayNode = objectMapper.createArrayNode();
-                        objectNode.set("jars", jarsArrayNode);
-                    }
-
-                    Set<String> existingJarPaths = new HashSet<>();
-                    for (JsonNode entry : jarsArrayNode) {
-                        if (entry.isObject()
-                                && entry.has("file")
-                                && entry.get("file").isTextual()) {
-                            existingJarPaths.add(entry.get("file").asText());
-                        }
-                    }
-
-                    int newEntriesAdded = 0;
-                    for (String bundledJarName : bundledJarFileNames) {
-                        String jarPathInMetaInf = "META-INF/jars/" + bundledJarName;
-                        if (!existingJarPaths.contains(jarPathInMetaInf)) {
-                            ObjectNode newJarEntry = objectMapper.createObjectNode();
-                            newJarEntry.put("file", jarPathInMetaInf);
-                            jarsArrayNode.add(newJarEntry);
-                            newEntriesAdded++;
-                        }
-                    }
-
-                    if (newEntriesAdded > 0) {
-                        File tempFile = Files.createTempFile(
-                                        fabricModJsonFile.getParentFile().toPath(), "fabric.mod.json", ".tmp")
-                                .toFile();
-                        objectMapper.writeValue(tempFile, objectNode);
-                        Files.move(
-                                tempFile.toPath(),
-                                fabricModJsonFile.toPath(),
-                                StandardCopyOption.REPLACE_EXISTING,
-                                StandardCopyOption.ATOMIC_MOVE);
-                    }
-                } catch (IOException e) {
-                    throw new GradleException(
-                            "Silk: Failed to read or write fabric.mod.json at " + fabricModJsonFile.getAbsolutePath(),
-                            e);
-                }
-            });
-        });
-
         project.getTasks().named("jar", Jar.class, jarTask -> {
             jarTask.dependsOn(modifyFabricModJsonTask);
 
@@ -487,20 +387,37 @@ public class SilkPlugin implements Plugin<Project> {
 
             task.dependsOn(transformGameClassesTaskProvider);
 
+            Provider<File> gameJarProvider = transformGameClassesTaskProvider
+                    .flatMap(TransformClassesTask::getOutputTransformedJar)
+                    .map(RegularFile::getAsFile);
+
+            task.onlyIf(t -> {
+                String mainClass = effectiveLoaderMainClass.getOrNull();
+                if (mainClass == null || mainClass.trim().isEmpty()) {
+                    project.getLogger()
+                            .warn(
+                                    "Silk: 'runGame' task is unavailable because Silk Loader main class could not be determined. "
+                                            + "Please ensure 'silk.silkLoaderCoordinates' is set correctly and resolves to a JAR with a Main-Class, "
+                                            + "or provide 'silk.silkLoaderMainClassOverride'.");
+                    return false;
+                }
+
+                if (!gameJarProvider.isPresent() || !gameJarProvider.get().exists()) {
+                    project.getLogger()
+                            .warn(
+                                    "Silk: 'runGame' task is unavailable because the transformed game JAR file does not exist at the expected location: {}. "
+                                            + "Please ensure the 'transformGameClasses' task completed successfully and created this output.",
+                                    gameJarProvider.get().getAbsolutePath());
+                    return false;
+                }
+
+                return true;
+            });
+
             task.setWorkingDir(extension.getRunDir().getAsFile());
 
             TaskProvider<Jar> jarTaskProvider = project.getTasks().named("jar", Jar.class);
             Provider<RegularFile> modJarFileProvider = jarTaskProvider.flatMap(Jar::getArchiveFile);
-            Provider<File> gameJarProvider = transformGameClassesTaskProvider.flatMap(TransformClassesTask::getOutputTransformedJar).map(RegularFile::getAsFile);
-
-            /*
-            task.jvmArgs(
-                    "-Dfabric.development=true",
-                    "-Deqmodloader.loadedNatives=true",
-                    "-Dfabric.gameJarPath=" + gameJarProvider.get().getAbsolutePath(),
-                    nativesDir.map(d -> "-Djava.library.path=" + d.getAsFile().getAbsolutePath())
-            );
-            */
 
             task.classpath(
                     gameJarProvider,
@@ -524,11 +441,11 @@ public class SilkPlugin implements Plugin<Project> {
                 }
 
                 task.jvmArgs(
-                    "-Dfabric.development=true",
-                    "-Deqmodloader.loadedNatives=true",
-                    "-Dfabric.gameJarPath=" + gameJarProvider.get().getAbsolutePath(),
-                    "-Djava.library.path=" + nativesDir.get().getAsFile().getAbsolutePath()
-                );
+                        "-Dfabric.development=true",
+                        "-Deqmodloader.loadedNatives=true",
+                        "-Dfabric.gameJarPath=" + gameJarProvider.get().getAbsolutePath(),
+                        "-Djava.library.path=" + nativesDir.get().getAsFile().getAbsolutePath() + File.pathSeparator
+                                + gameJarProvider.get().getParentFile().getAbsolutePath());
             });
         });
 
@@ -554,24 +471,23 @@ public class SilkPlugin implements Plugin<Project> {
             SilkExtension currentExtension = evaluatedProject.getExtensions().getByType(SilkExtension.class);
             boolean isGenerationEnabled =
                     currentExtension.getGenerateFabricModJson().getOrElse(false);
-            File manualFabricModJsonFile = evaluatedProject
-                    .getLayout()
-                    .getProjectDirectory()
-                    .file("src/main/resources/fabric.mod.json") // TODO:
-                    .getAsFile();
-
             SourceSet currentMainSourceSet = evaluatedProject
                     .getExtensions()
                     .getByType(JavaPluginExtension.class)
                     .getSourceSets()
                     .getByName(SourceSet.MAIN_SOURCE_SET_NAME);
 
+            File mainResourcesDir =
+                    currentMainSourceSet.getResources().getSrcDirs().iterator().next();
+            File manualFabricModJsonFile = new File(mainResourcesDir, "fabric.mod.json");
+
             if (isGenerationEnabled) {
                 currentMainSourceSet.getResources().srcDir(generatedFabricModJsonDir);
 
                 if (manualFabricModJsonFile.exists()) {
                     throw new GradleException(
-                            "Silk Plugin: 'silk.generateFabricModJson' is true, but a 'src/main/resources/fabric.mod.json' "
+                            "Silk Plugin: 'silk.generateFabricModJson' is true, but '"
+                                    + manualFabricModJsonFile.getPath() + "' "
                                     + "also exists. Please either remove the manual file or set 'generateFabricModJson = false'.");
                 }
             }
@@ -585,7 +501,6 @@ public class SilkPlugin implements Plugin<Project> {
      * @param project The project to add repositories to.
      */
     private void conditionallyAddRepositories(Project project) {
-        boolean mavenCentralExists = false;
         boolean fabricMavenExists = false;
         boolean jitpackMavenExists = false;
 
@@ -596,9 +511,6 @@ public class SilkPlugin implements Plugin<Project> {
                     repoUrl = repoUrl.substring(0, repoUrl.length() - 1);
                 }
 
-                if (MAVEN_CENTRAL_URL1.equals(repoUrl) || MAVEN_CENTRAL_URL2.equals(repoUrl)) {
-                    mavenCentralExists = true;
-                }
                 if (JITPACK_MAVEN_URL.equals(repoUrl)) {
                     jitpackMavenExists = true;
                 }
@@ -608,9 +520,7 @@ public class SilkPlugin implements Plugin<Project> {
             }
         }
 
-        if (!mavenCentralExists) {
-            project.getRepositories().mavenCentral();
-        }
+        project.getRepositories().mavenCentral();
 
         if (!jitpackMavenExists) {
             project.getRepositories().maven(repo -> {
@@ -618,7 +528,6 @@ public class SilkPlugin implements Plugin<Project> {
                 repo.setName("JitPack");
             });
         }
-
         if (!fabricMavenExists) {
             project.getRepositories().maven(repo -> {
                 repo.setUrl(URI.create(FABRIC_MAVEN_URL));

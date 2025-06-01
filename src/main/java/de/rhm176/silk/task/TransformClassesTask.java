@@ -122,8 +122,6 @@ public abstract class TransformClassesTask extends DefaultTask {
     @OutputFile
     public abstract RegularFileProperty getOutputTransformedJar();
 
-    private Map<String, ProcessedAccessWidener> aggregatedProcessedAwRules = Collections.emptyMap();
-
     private Map<String, ProcessedAccessWidener> processRawAwRules(List<AccessWidenerRule> rawRules) {
         Map<String, ProcessedAccessWidener> organizedRules = new HashMap<>();
         if (rawRules == null) return organizedRules;
@@ -132,7 +130,7 @@ public abstract class TransformClassesTask extends DefaultTask {
             String classNameInternal = rule.getClassName();
             AccessModifier modifier = rule.getModifier();
 
-            if (rule instanceof ClassAccessWidener classWidener) {
+            if (rule instanceof ClassAccessWidener) {
                 ProcessedAccessWidener classRules =
                         organizedRules.computeIfAbsent(classNameInternal, k -> new ProcessedAccessWidener());
                 classRules.updateClassModifierWithRule(modifier);
@@ -193,7 +191,9 @@ public abstract class TransformClassesTask extends DefaultTask {
         Map<String, List<String>> interfaceMappings = new HashMap<>();
         List<AccessWidenerRule> allRawAwRulesList = new ArrayList<>();
 
-        for (File sourceFileOrJar : getModConfigurationSources().getFiles()) {
+        for (File sourceFileOrJar : getModConfigurationSources().getFiles().stream()
+                .sorted(Comparator.comparing(File::getAbsolutePath))
+                .toList()) {
             if (!sourceFileOrJar.exists()) continue;
 
             if (sourceFileOrJar.isFile() && sourceFileOrJar.getName().equals("fabric.mod.json")) {
@@ -227,30 +227,35 @@ public abstract class TransformClassesTask extends DefaultTask {
             }
         }
 
-        this.aggregatedProcessedAwRules =
+        Map<String, ProcessedAccessWidener> aggregatedProcessedAwRules =
                 allRawAwRulesList.isEmpty() ? Collections.emptyMap() : processRawAwRules(allRawAwRulesList);
-
         try (JarInputStream jis = new JarInputStream(new BufferedInputStream(new FileInputStream(inputJarFile)));
                 JarOutputStream jos =
                         new JarOutputStream(new BufferedOutputStream(new FileOutputStream(outputJarFile)))) {
 
-            JarEntry entry;
-            while ((entry = jis.getNextJarEntry()) != null) {
-                jos.putNextEntry(new ZipEntry(entry.getName()));
+            JarEntry originalEntry;
+            while ((originalEntry = jis.getNextJarEntry()) != null) {
+                ZipEntry entryToWrite = new ZipEntry(originalEntry.getName());
+                if (originalEntry.getTime() != -1) {
+                    entryToWrite.setTime(originalEntry.getTime());
+                }
 
-                if (entry.isDirectory()) {
+                jos.putNextEntry(entryToWrite);
+
+                if (originalEntry.isDirectory()) {
                     jos.closeEntry();
                     continue;
                 }
 
                 byte[] entryBytes = readEntryData(jis);
 
-                if (entry.getName().endsWith(".class")) {
-                    String classNameInternal =
-                            entry.getName().substring(0, entry.getName().length() - ".class".length());
+                if (originalEntry.getName().endsWith(".class")) {
+                    String classNameInternal = originalEntry
+                            .getName()
+                            .substring(0, originalEntry.getName().length() - ".class".length());
                     List<String> interfacesToAdd = interfaceMappings.get(classNameInternal);
-                    ProcessedAccessWidener awRules = this.aggregatedProcessedAwRules.getOrDefault(
-                            classNameInternal, new ProcessedAccessWidener());
+                    ProcessedAccessWidener awRules =
+                            aggregatedProcessedAwRules.getOrDefault(classNameInternal, new ProcessedAccessWidener());
 
                     if ((interfacesToAdd != null && !interfacesToAdd.isEmpty()) || !awRules.isEmpty()) {
                         getLogger()
@@ -276,7 +281,7 @@ public abstract class TransformClassesTask extends DefaultTask {
     private void mergeMappings(Map<String, List<String>> targetMap, Map<String, List<String>> newMappings) {
         newMappings.forEach((className, interfaces) -> {
             targetMap.computeIfAbsent(className, k -> new ArrayList<>()).addAll(interfaces);
-            targetMap.put(className, new ArrayList<>(new HashSet<>(targetMap.get(className))));
+            targetMap.put(className, targetMap.get(className).stream().sorted().toList());
         });
     }
 
@@ -303,9 +308,8 @@ public abstract class TransformClassesTask extends DefaultTask {
             JsonNode injectionsNode = customNode.path("silk:injected_interfaces");
             if (injectionsNode.isObject()) {
                 Map<String, List<String>> currentFileMappings = new HashMap<>();
-                Iterator<Map.Entry<String, JsonNode>> fields = injectionsNode.fields();
-                while (fields.hasNext()) {
-                    Map.Entry<String, JsonNode> field = fields.next();
+                Set<Map.Entry<String, JsonNode>> fields = injectionsNode.properties();
+                for (Map.Entry<String, JsonNode> field : fields) {
                     String className = field.getKey().replace('.', '/');
                     JsonNode interfacesArray = field.getValue();
                     if (interfacesArray.isArray()) {
@@ -316,6 +320,7 @@ public abstract class TransformClassesTask extends DefaultTask {
                                         interfaceNode.asText().replace('.', '/'));
                             }
                         }
+                        Collections.sort(normalizedInterfaceNames);
                         if (!className.isEmpty() && !normalizedInterfaceNames.isEmpty()) {
                             currentFileMappings
                                     .computeIfAbsent(className, k -> new ArrayList<>())
@@ -323,8 +328,9 @@ public abstract class TransformClassesTask extends DefaultTask {
                         }
                     }
                 }
-                currentFileMappings.forEach(
-                        (cn, il) -> currentFileMappings.put(cn, new ArrayList<>(new HashSet<>(il))));
+
+                currentFileMappings.forEach((cn, il) ->
+                        currentFileMappings.put(cn, il.stream().sorted().toList()));
                 mergeMappings(outInterfaceMappings, currentFileMappings);
             }
         }
@@ -411,18 +417,25 @@ public abstract class TransformClassesTask extends DefaultTask {
                     newAccess = applyClassAccessModifier(access, awRulesForThisClass.classModifier);
                 }
 
-                Set<String> allInterfaces = new HashSet<>();
+                Set<String> combinedInterfacesSet = new HashSet<>();
                 if (existingInterfaces != null) {
-                    allInterfaces.addAll(Arrays.asList(existingInterfaces));
+                    combinedInterfacesSet.addAll(Arrays.asList(existingInterfaces));
                 }
                 if (interfacesToAddInternalNames != null) {
                     for (String internalName : interfacesToAddInternalNames) {
                         if (internalName != null && !internalName.trim().isEmpty()) {
-                            allInterfaces.add(internalName);
+                            combinedInterfacesSet.add(internalName);
                         }
                     }
                 }
-                super.visit(version, newAccess, name, signature, superName, allInterfaces.toArray(new String[0]));
+
+                super.visit(
+                        version,
+                        newAccess,
+                        name,
+                        signature,
+                        superName,
+                        combinedInterfacesSet.stream().sorted().toArray(String[]::new));
             }
 
             @Override
