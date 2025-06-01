@@ -68,7 +68,6 @@ public abstract class GenerateFabricJsonTask extends DefaultTask {
     private static final Pattern EMAIL_PATTERN = Pattern.compile("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,6}$");
     private static final Pattern ENTRYPOINT_VALUE_PATTERN = Pattern.compile(
             "^(\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*(\\.\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*)*)(::\\p{javaJavaIdentifierStart}\\p{javaJavaIdentifierPart}*)?$");
-    private static final Set<String> VALID_ENVIRONMENTS = Set.of("*", "client", "server");
 
     /**
      * The mod identifier. A string matching the pattern {@code ^[a-z][a-z0-9-_]{1,63}$}.
@@ -530,35 +529,6 @@ public abstract class GenerateFabricJsonTask extends DefaultTask {
         }
     }
 
-    private void validateEnvironment(List<String> errors, Object environmentObj) {
-        if (environmentObj == null) return;
-
-        if (environmentObj instanceof String envString) {
-            if (!VALID_ENVIRONMENTS.contains(envString)) {
-                errors.add(String.format(
-                        "Invalid 'environment' string value: \"%s\". Must be one of %s.",
-                        envString, VALID_ENVIRONMENTS));
-            }
-        } else if (environmentObj instanceof List) {
-            @SuppressWarnings("unchecked")
-            List<String> envList = (List<String>) environmentObj;
-            if (envList.isEmpty()) {
-                errors.add("'environment' list cannot be empty if provided as a list.");
-            }
-            for (String env : envList) {
-                if (env == null || env.trim().isEmpty() || !VALID_ENVIRONMENTS.contains(env) || env.equals("*")) {
-                    errors.add(String.format(
-                            "Invalid 'environment' list entry: \"%s\". Must be 'client' or 'server'. '*' is not allowed in list form.",
-                            env));
-                }
-            }
-        } else {
-            errors.add(String.format(
-                    "'environment' must be a String or a List<String>, but was: %s",
-                    environmentObj.getClass().getName()));
-        }
-    }
-
     private void validateEntrypoints(List<String> errors, EntrypointContainerExtension container) {
         Map<String, ListProperty<EntrypointExtension>> types =
                 container.getTypes().getOrElse(Collections.emptyMap());
@@ -792,10 +762,6 @@ public abstract class GenerateFabricJsonTask extends DefaultTask {
         }
         try {
             OBJECT_MAPPER.writeValue(outputFile, rootNode);
-            getLogger()
-                    .lifecycle(
-                            "Successfully generated fabric.mod.json with validated data at: {}",
-                            outputFile.getAbsolutePath());
         } catch (IOException e) {
             throw new GradleException("Failed to write fabric.mod.json to " + outputFile.getAbsolutePath(), e);
         }

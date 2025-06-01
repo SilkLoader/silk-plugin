@@ -35,7 +35,11 @@ import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
+import java.nio.file.StandardCopyOption;
 import java.util.*;
+import java.util.jar.Attributes;
+import java.util.jar.JarFile;
+import java.util.jar.Manifest;
 import java.util.stream.Collectors;
 import org.gradle.api.*;
 import org.gradle.api.artifacts.Configuration;
@@ -49,6 +53,7 @@ import org.gradle.api.plugins.JavaPluginExtension;
 import org.gradle.api.provider.Provider;
 import org.gradle.api.tasks.*;
 import org.gradle.api.tasks.bundling.Jar;
+import org.gradle.api.tasks.compile.JavaCompile;
 import org.gradle.language.jvm.tasks.ProcessResources;
 import org.jetbrains.annotations.NotNull;
 
@@ -56,11 +61,6 @@ import org.jetbrains.annotations.NotNull;
  * Main plugin class for Silk, a Gradle plugin to facilitate mod development for Equilinox.
  */
 public class SilkPlugin implements Plugin<Project> {
-    /**
-     * The main class for the mod loader.
-     */
-    public static final String LOADER_MAIN_CLASS = "de.rhm176.loader.Main";
-
     private static final String FABRIC_MAVEN_URL = "https://maven.fabricmc.net/";
     private static final String MAVEN_CENTRAL_URL1 = "https://repo.maven.apache.org/maven2";
     private static final String MAVEN_CENTRAL_URL2 = "https://repo1.maven.org/maven2";
@@ -90,6 +90,105 @@ public class SilkPlugin implements Plugin<Project> {
         extension
                 .getRunDir()
                 .convention(project.getLayout().getProjectDirectory().dir("run"));
+
+        project.getConfigurations().named(JavaPlugin.IMPLEMENTATION_CONFIGURATION_NAME, conf -> {
+            conf.getDependencies().addLater(extension.getSilkLoaderCoordinates().map(coords -> {
+                if (coords == null) return null;
+                if (coords instanceof CharSequence && coords.toString().trim().isEmpty()) return null;
+                return project.getDependencies().create(coords);
+            }));
+        });
+
+        Provider<File> loaderJarFileProvider = extension
+                .getSilkLoaderCoordinates()
+                .flatMap(coords -> {
+                    if (coords == null) {
+                        project.getLogger()
+                                .info("Silk: silkLoaderCoordinates is null. No loader JAR will be configured from it.");
+                        return project.provider(() -> null);
+                    }
+
+                    if (coords instanceof CharSequence
+                            && coords.toString().trim().isEmpty()) {
+                        project.getLogger()
+                                .info(
+                                        "Silk: silkLoaderCoordinates is an empty or blank string. No loader JAR will be configured from it.");
+                        return project.provider(() -> null);
+                    }
+
+                    Dependency dependency;
+                    try {
+                        dependency = project.getDependencies().create(coords);
+                    } catch (Exception e) {
+                        project.getLogger()
+                                .warn(
+                                        "Silk: Could not create a Gradle Dependency from silkLoaderCoordinates (value: '{}', type: {}). Error: {}. No loader JAR will be configured from it.",
+                                        coords,
+                                        coords.getClass().getName(),
+                                        e.getMessage());
+                        return project.provider(() -> null);
+                    }
+
+                    Configuration detachedConf = project.getConfigurations().detachedConfiguration(dependency);
+                    detachedConf.setTransitive(false);
+                    detachedConf.setDescription("Detached configuration for resolving the Silk Loader JAR.");
+
+                    return detachedConf.getElements().map(resolvedFiles -> {
+                        if (resolvedFiles.isEmpty()) {
+                            project.getLogger()
+                                    .warn(
+                                            "Silk: Resolving silkLoaderCoordinates (original: '{}', as dependency: '{}') yielded no files.",
+                                            coords,
+                                            dependency);
+                            return null;
+                        }
+
+                        for (FileSystemLocation location : resolvedFiles) {
+                            File file = location.getAsFile();
+                            if (file.isFile() && file.getName().toLowerCase().endsWith(".jar")) {
+                                project.getLogger().debug("Silk: Resolved Silk Loader JAR: {}", file.getAbsolutePath());
+                                return file;
+                            }
+                        }
+
+                        project.getLogger()
+                                .warn(
+                                        "Silk: No .jar file found among resolved files for silkLoaderCoordinates (original: '{}', as dependency: '{}'). Resolved files: {}",
+                                        coords,
+                                        dependency,
+                                        resolvedFiles.stream()
+                                                .map(fsl -> fsl.getAsFile().getName())
+                                                .collect(Collectors.toList()));
+                        return null;
+                    });
+                });
+
+        Provider<String> mainClassFromConfiguredLoaderManifest = project.provider(() -> {
+            File loaderJarFile = loaderJarFileProvider.getOrNull();
+
+            if (loaderJarFile == null || !loaderJarFile.exists()) {
+                return null;
+            }
+            try (JarFile jar = new JarFile(loaderJarFile)) {
+                Manifest manifest = jar.getManifest();
+                if (manifest != null) {
+                    String mainClass = manifest.getMainAttributes().getValue(Attributes.Name.MAIN_CLASS);
+                    if (mainClass != null && !mainClass.isEmpty()) {
+                        return mainClass;
+                    }
+                }
+            } catch (IOException e) {
+                project.getLogger()
+                        .warn(
+                                "Silk: Could not read manifest from {}. Error: {}",
+                                loaderJarFile.getName(),
+                                e.getMessage());
+            }
+            return null;
+        });
+
+        Provider<String> effectiveLoaderMainClass =
+                extension.getSilkLoaderMainClassOverride().orElse(mainClassFromConfiguredLoaderManifest);
 
         JavaPluginExtension javaExtension = project.getExtensions().getByType(JavaPluginExtension.class);
         SourceSet mainSourceSet = javaExtension.getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
@@ -139,20 +238,18 @@ public class SilkPlugin implements Plugin<Project> {
 
         TaskProvider<TransformClassesTask> transformGameClassesTaskProvider = project.getTasks()
                 .register("transformGameClasses", TransformClassesTask.class, task -> {
-                    task.setDescription("Adds synthetic interfaces to game classes for API exposure.");
                     task.setGroup(null);
 
                     for (Project subProject : extension.getRegisteredSubprojectsInternal()) {
                         task.dependsOn(subProject.getTasksByName("modifyFabricModJson", false));
                     }
+                    task.dependsOn(project.getTasksByName("modifyFabricModJson", false));
 
                     task.getInputJar().set(extension.getGameJar());
 
-                    Provider<RegularFile> currentProjectModJsonProvider = generateFabricModJson.flatMap(GenerateFabricJsonTask::getOutputFile);
-                    task.getModConfigurationSources()
-                            .from(currentProjectModJsonProvider
-                                    .map(RegularFile::getAsFile)
-                                    .filter(File::exists));
+                    Provider<File> currentProjectModJsonProvider =
+                            processResourcesTask.map(t -> new File(t.getDestinationDir(), "fabric.mod.json"));
+                    task.getModConfigurationSources().from(currentProjectModJsonProvider);
 
                     for (Project subProject : extension.getRegisteredSubprojectsInternal()) {
                         subProject.getPlugins().withId("java", appliedJavaPlugin -> {
@@ -170,10 +267,12 @@ public class SilkPlugin implements Plugin<Project> {
                                         .getLayout()
                                         .file(subProcessResourcesTask.map(
                                                 prTask -> new File(prTask.getDestinationDir(), "fabric.mod.json")));
-                                task.getModConfigurationSources()
-                                        .from(subModJsonProvider
-                                                .map(RegularFile::getAsFile)
-                                                .filter(File::exists));
+                                Provider<File> subModJsonFileProvider = subModJsonProvider
+                                        .map(RegularFile::getAsFile)
+                                        .filter(File::exists);
+                                if (subModJsonFileProvider.isPresent()) {
+                                    task.getModConfigurationSources().from(subModJsonFileProvider);
+                                }
                             } else {
                                 project.getLogger()
                                         .warn(
@@ -200,6 +299,10 @@ public class SilkPlugin implements Plugin<Project> {
                             .file("silk/transformed-jars/"
                                     + jar.getAsFile().getName().replace(".jar", "") + "-transformed.jar")));
                 });
+
+        project.getTasks()
+                .named(mainSourceSet.getCompileJavaTaskName(), JavaCompile.class)
+                .configure(t -> t.dependsOn(transformGameClassesTaskProvider));
 
         Configuration vineflowerClasspath = project.getConfigurations().create("vineflowerTool", config -> {
             config.setDescription("Classpath for Vineflower decompiler tool.");
@@ -298,16 +401,7 @@ public class SilkPlugin implements Plugin<Project> {
                 File fabricModJsonFile = outputFabricModJsonFile.get().getAsFile();
                 List<String> bundledJarFileNames = bundledJarNamesProvider.get();
 
-                if (!fabricModJsonFile.exists()) {
-                    t.getLogger()
-                            .info(
-                                    "Silk: fabric.mod.json not found at '{}'. Skipping modification.",
-                                    fabricModJsonFile.getAbsolutePath());
-                    return;
-                }
-                if (bundledJarFileNames.isEmpty()) {
-                    t.getLogger()
-                            .info("Silk: No submods registered for bundling. Skipping fabric.mod.json modification.");
+                if (!fabricModJsonFile.exists() || bundledJarFileNames.isEmpty()) {
                     return;
                 }
 
@@ -370,19 +464,9 @@ public class SilkPlugin implements Plugin<Project> {
                         Files.move(
                                 tempFile.toPath(),
                                 fabricModJsonFile.toPath(),
-                                java.nio.file.StandardCopyOption.REPLACE_EXISTING,
-                                java.nio.file.StandardCopyOption.ATOMIC_MOVE);
-                        t.getLogger()
-                                .lifecycle(
-                                        "Silk: Updated fabric.mod.json at '{}' with {} new bundled mod entries.",
-                                        fabricModJsonFile.getAbsolutePath(),
-                                        newEntriesAdded);
-                    } else {
-                        t.getLogger()
-                                .info(
-                                        "Silk: All registered bundled mods are already present in fabric.mod.json or no new mods to add.");
+                                StandardCopyOption.REPLACE_EXISTING,
+                                StandardCopyOption.ATOMIC_MOVE);
                     }
-
                 } catch (IOException e) {
                     throw new GradleException(
                             "Silk: Failed to read or write fabric.mod.json at " + fabricModJsonFile.getAbsolutePath(),
@@ -403,22 +487,20 @@ public class SilkPlugin implements Plugin<Project> {
 
             task.dependsOn(transformGameClassesTaskProvider);
 
-            File runDir = extension.getRunDir().getAsFile().get();
-            task.setWorkingDir(runDir);
+            task.setWorkingDir(extension.getRunDir().getAsFile());
 
             TaskProvider<Jar> jarTaskProvider = project.getTasks().named("jar", Jar.class);
             Provider<RegularFile> modJarFileProvider = jarTaskProvider.flatMap(Jar::getArchiveFile);
-            Provider<File> gameJarProvider = transformGameClassesTaskProvider
-                    .get()
-                    .getOutputTransformedJar()
-                    .getAsFile();
+            Provider<File> gameJarProvider = transformGameClassesTaskProvider.flatMap(TransformClassesTask::getOutputTransformedJar).map(RegularFile::getAsFile);
 
+            /*
             task.jvmArgs(
                     "-Dfabric.development=true",
                     "-Deqmodloader.loadedNatives=true",
-                    "-Dfabric.gameJarPath=" + gameJarProvider.get().toPath().toAbsolutePath(),
-                    "-Djava.library.path="
-                            + nativesDir.get().getAsFile().toPath().toAbsolutePath());
+                    "-Dfabric.gameJarPath=" + gameJarProvider.get().getAbsolutePath(),
+                    nativesDir.map(d -> "-Djava.library.path=" + d.getAsFile().getAbsolutePath())
+            );
+            */
 
             task.classpath(
                     gameJarProvider,
@@ -431,15 +513,22 @@ public class SilkPlugin implements Plugin<Project> {
                     equilinoxConfiguration,
                     project.getConfigurations().named(JavaPlugin.RUNTIME_CLASSPATH_CONFIGURATION_NAME));
 
+            task.getMainClass().set(effectiveLoaderMainClass);
+
             task.doFirst(t -> {
+                File runDir = extension.getRunDir().getAsFile().get();
                 if (!runDir.exists()) {
                     if (!runDir.mkdirs()) {
-                        t.getLogger()
-                                .warn("runGame task: Failed to create working directory: {}", runDir.getAbsolutePath());
+                        t.getLogger().warn("Silk: Failed to create working directory: {}", runDir.getAbsolutePath());
                     }
                 }
 
-                task.getMainClass().set(LOADER_MAIN_CLASS);
+                task.jvmArgs(
+                    "-Dfabric.development=true",
+                    "-Deqmodloader.loadedNatives=true",
+                    "-Dfabric.gameJarPath=" + gameJarProvider.get().getAbsolutePath(),
+                    "-Djava.library.path=" + nativesDir.get().getAsFile().getAbsolutePath()
+                );
             });
         });
 
@@ -448,10 +537,12 @@ public class SilkPlugin implements Plugin<Project> {
                         JavaPlugin.COMPILE_ONLY_CONFIGURATION_NAME,
                         extension.getGameJar().flatMap(gameJarRegularFile -> {
                             File gameJarAsIoFile = gameJarRegularFile.getAsFile();
-                            Provider<RegularFile> transformedGameJar = transformGameClassesTaskProvider
-                                    .flatMap(TransformClassesTask::getOutputTransformedJar);
-                            if (transformedGameJar.isPresent() && transformedGameJar.get().getAsFile().exists()) {
-                                return project.provider(() -> project.files(transformedGameJar.get().getAsFile().getAbsolutePath()));
+                            Provider<RegularFile> transformedGameJar = transformGameClassesTaskProvider.flatMap(
+                                    TransformClassesTask::getOutputTransformedJar);
+                            if (transformedGameJar.isPresent()
+                                    && transformedGameJar.get().getAsFile().exists()) {
+                                return project.provider(() -> project.files(
+                                        transformedGameJar.get().getAsFile().getAbsolutePath()));
                             } else if (gameJarAsIoFile.exists()) {
                                 return project.provider(() -> project.files(gameJarAsIoFile.getAbsolutePath()));
                             } else {
@@ -466,7 +557,7 @@ public class SilkPlugin implements Plugin<Project> {
             File manualFabricModJsonFile = evaluatedProject
                     .getLayout()
                     .getProjectDirectory()
-                    .file("src/main/resources/fabric.mod.json")
+                    .file("src/main/resources/fabric.mod.json") // TODO:
                     .getAsFile();
 
             SourceSet currentMainSourceSet = evaluatedProject
@@ -499,8 +590,8 @@ public class SilkPlugin implements Plugin<Project> {
         boolean jitpackMavenExists = false;
 
         for (ArtifactRepository repo : project.getRepositories()) {
-            if (repo instanceof MavenArtifactRepository) {
-                String repoUrl = ((MavenArtifactRepository) repo).getUrl().toString();
+            if (repo instanceof MavenArtifactRepository mavenRepo) {
+                String repoUrl = mavenRepo.getUrl().toString();
                 if (repoUrl.endsWith("/")) {
                     repoUrl = repoUrl.substring(0, repoUrl.length() - 1);
                 }

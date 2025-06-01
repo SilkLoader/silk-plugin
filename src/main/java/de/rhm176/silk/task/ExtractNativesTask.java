@@ -128,7 +128,6 @@ public abstract class ExtractNativesTask extends DefaultTask {
                 throw new GradleException("Could not create natives directory: " + nativesDir.getAbsolutePath());
             }
         }
-        getLogger().info("Extracting natives from {} to {}", jar.getName(), nativesDir.getAbsolutePath());
 
         try (JarFile jarFile = new JarFile(jar, false)) {
             Enumeration<JarEntry> entries = jarFile.entries();
@@ -150,13 +149,12 @@ public abstract class ExtractNativesTask extends DefaultTask {
                             out.write(buffer, 0, bytesRead);
                         }
                         extractedCount++;
-                        getLogger().debug("Extracted native file: {}", entry.getName());
+                        getLogger().debug("Silk: Extracted native file: {}", entry.getName());
                     } catch (IOException e) {
                         throw new GradleException("Failed to extract native file: " + entry.getName(), e);
                     }
                 }
             }
-            getLogger().info("Extracted {} native files.", extractedCount);
         } catch (IOException e) {
             throw new GradleException("Error processing JAR file: " + jar.getAbsolutePath(), e);
         }

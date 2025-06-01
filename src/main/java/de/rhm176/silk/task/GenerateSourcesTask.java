@@ -137,8 +137,6 @@ public abstract class GenerateSourcesTask extends DefaultTask {
                     + tempDecompiledDir.getAbsolutePath());
         }
 
-        project.getLogger().lifecycle("Silk Plugin: Decompiling {} using Vineflower...", gameJarFile.getName());
-
         List<String> vineflowerArgs = constructVineflowerArgs(
                 gameJarFile, tempDecompiledDir, getVineflowerArgs().get());
 
@@ -153,14 +151,8 @@ public abstract class GenerateSourcesTask extends DefaultTask {
                     })
                     .assertNormalExitValue();
         } catch (Exception e) {
-            project.getLogger()
-                    .error("Silk Plugin: Vineflower decompilation failed. See output above for details. "
-                            + "You might need to adjust Vineflower options or check its version compatibility.");
             throw new GradleException("Vineflower decompilation failed for " + gameJarFile.getName(), e);
         }
-
-        project.getLogger()
-                .lifecycle("Silk Plugin: Decompilation complete. Jarring sources to {}...", sourcesJarFile.getName());
 
         if (sourcesJarFile.exists()) {
             project.delete(sourcesJarFile);
@@ -176,9 +168,6 @@ public abstract class GenerateSourcesTask extends DefaultTask {
                     "basedir", tempDecompiledDir.getAbsolutePath(),
                     "compress", Boolean.TRUE)
         });
-
-        project.getLogger()
-                .lifecycle("Silk Plugin: Successfully generated sources: {}", sourcesJarFile.getAbsolutePath());
     }
 
     /**
@@ -216,7 +205,7 @@ public abstract class GenerateSourcesTask extends DefaultTask {
         Map<String, String> mergedArgs = new LinkedHashMap<>();
 
         List<String> defaultArgs = new ArrayList<>();
-        defaultArgs.add("-log=WARN"); // Set default log level
+        defaultArgs.add("-log=WARN");
 
         for (String arg : defaultArgs) {
             mergedArgs.put(getArgKey(arg), arg);

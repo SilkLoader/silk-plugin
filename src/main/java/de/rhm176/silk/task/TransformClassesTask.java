@@ -37,7 +37,6 @@ import org.gradle.api.GradleException;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.RegularFileProperty;
 import org.gradle.api.tasks.*;
-import org.gradle.api.tasks.Optional;
 import org.objectweb.asm.*;
 
 /**
@@ -191,33 +190,28 @@ public abstract class TransformClassesTask extends DefaultTask {
             }
         }
 
-        getLogger()
-                .lifecycle(
-                        "Starting transformation of JAR: {} with aggregated Access Wideners and Interface Injections",
-                        inputJarFile.getName());
-
         Map<String, List<String>> interfaceMappings = new HashMap<>();
         List<AccessWidenerRule> allRawAwRulesList = new ArrayList<>();
 
         for (File sourceFileOrJar : getModConfigurationSources().getFiles()) {
-            getLogger().debug("Processing configuration source: {}", sourceFileOrJar.getAbsolutePath());
             if (!sourceFileOrJar.exists()) continue;
 
             if (sourceFileOrJar.isFile() && sourceFileOrJar.getName().equals("fabric.mod.json")) {
-                getLogger().info("Processing direct fabric.mod.json: {}", sourceFileOrJar.getAbsolutePath());
                 try (InputStream is = new FileInputStream(sourceFileOrJar)) {
                     processFabricModJsonStream(
                             is, sourceFileOrJar.getAbsolutePath(), interfaceMappings, allRawAwRulesList, null);
                 } catch (IOException e) {
                     getLogger()
-                            .error("Failed to read direct fabric.mod.json: {}", sourceFileOrJar.getAbsolutePath(), e);
+                            .error(
+                                    "Silk: Failed to read direct fabric.mod.json: {}",
+                                    sourceFileOrJar.getAbsolutePath(),
+                                    e);
                 }
             } else if (sourceFileOrJar.isFile()
                     && sourceFileOrJar.getName().toLowerCase().endsWith(".jar")) {
                 try (JarFile jar = new JarFile(sourceFileOrJar)) {
                     JarEntry fmjEntry = jar.getJarEntry("fabric.mod.json");
                     if (fmjEntry != null) {
-                        getLogger().info("Processing fabric.mod.json from JAR: {}", sourceFileOrJar.getName());
                         try (InputStream is = jar.getInputStream(fmjEntry)) {
                             processFabricModJsonStream(
                                     is,
@@ -228,7 +222,7 @@ public abstract class TransformClassesTask extends DefaultTask {
                         }
                     }
                 } catch (IOException e) {
-                    getLogger().warn("Could not read JAR: {}", sourceFileOrJar.getAbsolutePath(), e);
+                    getLogger().warn("Silk: Could not read JAR: {}", sourceFileOrJar.getAbsolutePath(), e);
                 }
             }
         }
@@ -254,14 +248,14 @@ public abstract class TransformClassesTask extends DefaultTask {
                 if (entry.getName().endsWith(".class")) {
                     String classNameInternal =
                             entry.getName().substring(0, entry.getName().length() - ".class".length());
-                    List<String> interfacesToAdd = interfaceMappings.get(classNameInternal); // May be null
+                    List<String> interfacesToAdd = interfaceMappings.get(classNameInternal);
                     ProcessedAccessWidener awRules = this.aggregatedProcessedAwRules.getOrDefault(
                             classNameInternal, new ProcessedAccessWidener());
 
                     if ((interfacesToAdd != null && !interfacesToAdd.isEmpty()) || !awRules.isEmpty()) {
                         getLogger()
                                 .debug(
-                                        "Transforming class {}: adding interfaces {} and applying AW rules.",
+                                        "Silk: Transforming class {}: adding interfaces {} and applying AW rules.",
                                         classNameInternal,
                                         Objects.toString(interfacesToAdd, "none"));
                         try {
@@ -300,11 +294,10 @@ public abstract class TransformClassesTask extends DefaultTask {
             String fmjSourceDescription,
             Map<String, List<String>> outInterfaceMappings,
             List<AccessWidenerRule> outRawAwRulesList,
-            JarFile containingJar // Pass null if fmjStream is not from a JAR
-            ) throws IOException {
+            JarFile containingJar)
+            throws IOException {
         JsonNode rootNode = OBJECT_MAPPER.readTree(fmjStream);
 
-        // 1. Parse Interface Mappings (as before)
         JsonNode customNode = rootNode.path("custom");
         if (customNode.isObject()) {
             JsonNode injectionsNode = customNode.path("silk:injected_interfaces");
@@ -330,22 +323,19 @@ public abstract class TransformClassesTask extends DefaultTask {
                         }
                     }
                 }
-                // De-duplicate interfaces for the current file before merging globally
                 currentFileMappings.forEach(
                         (cn, il) -> currentFileMappings.put(cn, new ArrayList<>(new HashSet<>(il))));
-                mergeMappings(outInterfaceMappings, currentFileMappings); // Your existing merge for interfaces
+                mergeMappings(outInterfaceMappings, currentFileMappings);
             }
         }
 
-        // 2. Parse Access Widener path and its rules
         JsonNode awPathNode = rootNode.path("accessWidener");
         if (awPathNode.isTextual()) {
             String awPath = awPathNode.asText();
             if (awPath != null && !awPath.trim().isEmpty()) {
-                getLogger().info("Found accessWidener path '{}' in {}", awPath, fmjSourceDescription);
                 try {
                     AccessWidener widener = null;
-                    if (containingJar != null) { // AW is inside the JAR
+                    if (containingJar != null) {
                         JarEntry awEntry = containingJar.getJarEntry(awPath);
                         if (awEntry != null) {
                             try (InputStream awStream = containingJar.getInputStream(awEntry)) {
@@ -354,7 +344,7 @@ public abstract class TransformClassesTask extends DefaultTask {
                         } else {
                             getLogger()
                                     .warn(
-                                            "AccessWidener file '{}' not found inside JAR '{}' (referenced by {}).",
+                                            "Silk: AccessWidener file '{}' not found inside JAR '{}' (referenced by {}).",
                                             awPath,
                                             containingJar.getName(),
                                             fmjSourceDescription);
@@ -377,59 +367,17 @@ public abstract class TransformClassesTask extends DefaultTask {
 
                     if (widener != null) {
                         outRawAwRulesList.addAll(widener.getRules());
-                        getLogger()
-                                .info(
-                                        "Added {} rules from AccessWidener: {}",
-                                        widener.getRules().size(),
-                                        awPath);
                     }
                 } catch (IOException | GradleException e) {
                     getLogger()
                             .error(
-                                    "Failed to load or parse AccessWidener '{}' referenced by {}: {}",
+                                    "Silk: Failed to load or parse AccessWidener '{}' referenced by {}: {}",
                                     awPath,
                                     fmjSourceDescription,
                                     e.getMessage());
                 }
             }
         }
-    }
-
-    private Map<String, List<String>> parseMappingsFromStream(InputStream inputStream) throws IOException {
-        JsonNode rootNode = OBJECT_MAPPER.readTree(inputStream);
-        JsonNode customNode = rootNode.path("custom");
-        if (customNode.isMissingNode() || !customNode.isObject()) {
-            return Map.of();
-        }
-
-        JsonNode injectionsNode = customNode.path("silk:injected_interfaces");
-        if (injectionsNode.isMissingNode() || !injectionsNode.isObject()) {
-            return Map.of();
-        }
-
-        Set<Map.Entry<String, JsonNode>> fields = injectionsNode.properties();
-        Map<String, List<String>> mappings = new HashMap<>();
-        for (Map.Entry<String, JsonNode> entry : fields) {
-            String className = entry.getKey().replace('.', '/');
-            JsonNode interfacesArray = entry.getValue();
-
-            if (interfacesArray.isArray()) {
-                List<String> normalizedInterfaceNames = new ArrayList<>();
-                for (JsonNode interfaceNode : interfacesArray) {
-                    if (interfaceNode.isTextual()) {
-                        normalizedInterfaceNames.add(interfaceNode.asText().replace('.', '/'));
-                    }
-                }
-
-                if (!className.isEmpty() && !normalizedInterfaceNames.isEmpty()) {
-                    mappings.computeIfAbsent(className, k -> new ArrayList<>()).addAll(normalizedInterfaceNames);
-                }
-            }
-        }
-
-        mappings.forEach(
-                (className, interfaceList) -> mappings.put(className, new ArrayList<>(new HashSet<>(interfaceList))));
-        return mappings;
     }
 
     private byte[] readEntryData(InputStream inputStream) throws IOException {
@@ -468,7 +416,7 @@ public abstract class TransformClassesTask extends DefaultTask {
                     allInterfaces.addAll(Arrays.asList(existingInterfaces));
                 }
                 if (interfacesToAddInternalNames != null) {
-                    for (String internalName : interfacesToAddInternalNames) { // Already internal format
+                    for (String internalName : interfacesToAddInternalNames) {
                         if (internalName != null && !internalName.trim().isEmpty()) {
                             allInterfaces.add(internalName);
                         }

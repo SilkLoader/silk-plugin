@@ -31,6 +31,7 @@ import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.jar.JarFile;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -100,14 +101,20 @@ public abstract class SilkExtension {
             }
             if (!targetList.contains(subProject)) {
                 targetList.add(subProject);
-                rootProject.getLogger().info("Silk: Registered subproject '{}' for bundling.", subProject.getPath());
             } else {
                 rootProject
                         .getLogger()
-                        .info("Silk: Subproject '{}' is already registered for bundling.", subProject.getPath());
+                        .warn(
+                                "Silk: Tried to register subproject '{}' for bundling twice. Ignoring.",
+                                subProject.getPath());
             }
         }
     }
+
+    // If the game can't be found by name, it will search all jars in the
+    // Equilinox install dir and if all of the listed classes are found,
+    // the jar is determined to be the game.
+    private static final List<String> equilinoxClassFiles = List.of("main/MainApp.class", "main/FirstScreenUi.class");
 
     private Provider<RegularFile> internalGameJarProvider;
     private final DirectoryProperty runDir;
@@ -118,12 +125,9 @@ public abstract class SilkExtension {
     private final List<Project> registeredSubprojects = new ArrayList<>();
     private final Property<Boolean> generateFabricModJson;
     private final Property<Boolean> verifyFabricModJson;
+    private final Property<Object> silkLoaderCoordinates;
+    private final Property<String> silkLoaderMainClassOverride;
 
-    /**
-     * Cached result of the Equilinox game JAR search.
-     * This helps to avoid repeated file system searches within the same Gradle build.
-     * Now stores a FileCollection.
-     */
     private FileCollection cachedEquilinoxGameJarFc = null;
 
     /**
@@ -143,7 +147,29 @@ public abstract class SilkExtension {
         this.generateFabricModJson = objectFactory.property(Boolean.class).convention(false);
         this.verifyFabricModJson = objectFactory.property(Boolean.class).convention(true);
 
+        this.silkLoaderCoordinates = objectFactory.property(Object.class);
+        this.silkLoaderMainClassOverride = objectFactory.property(String.class);
+
         this.modsContainer = objectFactory.newInstance(ModRegistration.class, project, registeredSubprojects);
+    }
+
+    /**
+     * Specifies the main class to use when launching the game.
+     * If not set, will instead try to determine the main class
+     * from the Silk Loader, which does not work on older versions.
+     * @return The property containing the main class
+     */
+    public Property<String> getSilkLoaderMainClassOverride() {
+        return silkLoaderMainClassOverride;
+    }
+
+    /**
+     * Specifies the loader dependency coordinates in "group:artifact:version" format.
+     * The Silk plugin will add this as a dependency to the project.
+     * @return The property containing the silk loader coordinates
+     */
+    public Property<Object> getSilkLoaderCoordinates() {
+        return silkLoaderCoordinates;
     }
 
     /**
@@ -275,17 +301,18 @@ public abstract class SilkExtension {
             List<File> files = equilinoxConfig.getFiles().stream().toList();
             if (files.isEmpty()) {
                 project.getLogger()
-                        .debug("No files found in '{}' configuration for game JAR.", equilinoxConfig.getName());
+                        .debug("Silk: No files found in '{}' configuration for game JAR.", equilinoxConfig.getName());
                 return null;
             }
             if (files.size() > 1) {
                 project.getLogger()
                         .warn(
-                                "Multiple files found in the '{}' configuration. Using the first one: {}. "
+                                "Silk: Multiple files found in the '{}' configuration. Using the first one: {}. "
                                         + "Please ensure only one game JAR is specified.",
                                 equilinoxConfig.getName(),
                                 files.get(0).getAbsolutePath());
             }
+            project.getLogger().info("TEST: {}", files.toString());
             return files.get(0);
         });
 
@@ -396,19 +423,20 @@ public abstract class SilkExtension {
         List<String> potentialJarNames = new ArrayList<>();
 
         if (os.contains("win")) {
+            potentialJarNames.add("Equilinox.jar");
             potentialJarNames.add("EquilinoxWindows.jar");
+            potentialJarNames.add("input.jar"); // can never hurt
         } else if (os.contains("mac")) {
             potentialJarNames.add("Equilinox.jar");
             potentialJarNames.add("EquilinoxMac.jar");
+            potentialJarNames.add("input.jar"); // maybe on mac also?
         } else {
             potentialJarNames.add("Equilinox.jar");
             potentialJarNames.add("EquilinoxLinux.jar");
+            potentialJarNames.add("input.jar"); // ??? wtf
         }
 
         List<Path> steamLibraryRoots = findSteamLibraryRoots(os);
-
-        project.getLogger()
-                .info("Silk: Searching for Equilinox JAR in {} Steam library roots...", steamLibraryRoots.size());
 
         for (Path libraryRoot : steamLibraryRoots) {
             Path commonDir = libraryRoot.resolve("steamapps").resolve("common");
@@ -418,21 +446,49 @@ public abstract class SilkExtension {
                 for (String jarName : potentialJarNames) {
                     Path gameJarPath = equilinoxGameDir.resolve(jarName);
                     if (Files.isRegularFile(gameJarPath)) {
-                        project.getLogger().info("Silk Plugin: Using {} as Equilinox jar.", gameJarPath);
                         this.cachedEquilinoxGameJarFc = project.files(gameJarPath.toFile());
-                        break;
+                        return this.cachedEquilinoxGameJarFc;
                     }
+                }
+
+                try (Stream<Path> stream = Files.list(equilinoxGameDir)) {
+                    List<Path> jarFilesInDir = stream.filter(p -> Files.isRegularFile(p)
+                                    && p.getFileName().toString().toLowerCase().endsWith(".jar"))
+                            .collect(Collectors.toList());
+
+                    for (Path potentialJar : jarFilesInDir) {
+                        if (isCorrectGameJarByContent(potentialJar)) {
+                            this.cachedEquilinoxGameJarFc = project.files(potentialJar.toFile());
+                            return this.cachedEquilinoxGameJarFc;
+                        }
+                    }
+                } catch (IOException e) {
+                    project.getLogger()
+                            .warn(
+                                    "Silk: Error listing/processing JARs for content check in {}: {}",
+                                    equilinoxGameDir,
+                                    e.getMessage());
                 }
             }
         }
 
-        if (this.cachedEquilinoxGameJarFc != null) {
-            return this.cachedEquilinoxGameJarFc;
-        }
-
-        project.getLogger().error("Silk: Equilinox game JAR could not be found automatically.");
         throw new GradleException(
                 "Silk plugin: Could not automatically find Equilinox game JAR. " + "Searched common Steam locations.");
+    }
+
+    private boolean isCorrectGameJarByContent(Path jarPath) {
+        if (!jarPath.toString().toLowerCase().endsWith(".jar")) return false;
+
+        try (JarFile jarFile = new JarFile(jarPath.toFile())) {
+            for (String classEntry : equilinoxClassFiles) {
+                if (jarFile.getJarEntry(classEntry) == null) {
+                    return false;
+                }
+            }
+            return true;
+        } catch (IOException e) {
+            return false;
+        }
     }
 
     private List<Path> findSteamLibraryRoots(String os) {
@@ -442,7 +498,7 @@ public abstract class SilkExtension {
         if (os.contains("win")) {
             addPotentialRoot(roots, Paths.get("C:\\Program Files (x86)\\Steam"));
             addPotentialRoot(roots, Paths.get("C:\\Program Files\\Steam"));
-            addPotentialRoot(roots, Paths.get("C:\\Users\\RHM\\scoop\\apps\\steam\\current"));
+            addPotentialRoot(roots, Paths.get(userHome, "scoop", "apps", "steam", "current"));
         } else if (os.contains("mac")) {
             addPotentialRoot(roots, Paths.get(userHome, "Library", "Application Support", "Steam"));
         } else {
