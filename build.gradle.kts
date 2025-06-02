@@ -40,7 +40,6 @@ java {
     targetCompatibility = javaVersion
 
     withSourcesJar()
-    withJavadocJar()
 }
 
 publishing {
