@@ -3,7 +3,6 @@
 **Silk Gradle Plugin is a tool designed to streamline the development of [Fabric](https://fabricmc.net/) mods for the game [Equilinox](https://www.equilinox.com/)**
 
 ## Features
- * **Automatic Repository Setup:** Adds FabricMC, Maven Central, and JitPack repositories to your project if they are not already present.
  * **(Optional) `fabric.mod.json` Generation:**
     * Generates the `fabric.mod.json` file based on a dedicated configuration block in your `build.gradle(.kts)`.
     * Optionally verifies the generated `fabric.mod.json` against the schema.
@@ -12,6 +11,7 @@
     * Updates `fabric.mod.json` to reference these bundled JARs, making multi-module mod development seamless.
  * **Development Workflow:**
     * **`runGame`**: Configures and launches Equilinox with your mod, its dependencies, and necessary JVM arguments for easy testing and debugging directly from Gradle.
+    * **`genSources`**: Generates a sources jar from the game jar which can be attached to IDEs for easier navigation of the source code.
 
 ## Prerequisites
 
@@ -27,23 +27,16 @@
     **Kotlin DSL (`build.gradle.kts`/`settings.gradle.kts`):**
     ```kotlin
     plugins {
-        id("de.rhm176.silk") version "<version>"
+        id("de.rhm176.silk.silk-plugin") version "<version>"
     }
     ```
     ```kotlin
     pluginManagement {
-        resolutionStrategy {
-            eachPlugin {
-                requested.apply {
-                    if ("$id" == "de.rhm176.silk") {
-                        useModule("com.github.SilkLoader:silk-plugin:v$version")
-                    }
-                }
-            }
-        }
-    
         repositories {
-            maven("https://jitpack.io")
+            maven {
+                url = uri("https://maven.rhm176.de/releases")
+                name = "RHM's Maven"
+            }
             gradlePluginPortal()
         }
     }
@@ -52,22 +45,15 @@
     **Groovy DSL (`build.gradle`/`settings.gradle`):**
     ```groovy
     plugins {
-        id 'de.rhm176.silk' version '<version>'
+        id 'de.rhm176.silk.silk-plugin' version '<version>'
     }
     ```
     ```groovy
     pluginManagement {
-        resolutionStrategy {
-            eachPlugin {
-                if (requested.id.name == 'de.rhm176.silk') { // or requested.id.toString() == 'de.rhm176.silk'
-                    useModule("com.github.SilkLoader:silk-plugin:v${requested.version}")
-                }
-            }
-        }
-    
         repositories {
             maven {
-                url 'https://jitpack.io'
+                url = "https://maven.rhm176.de/releases" 
+                name = "RHM's Maven"
             }
             gradlePluginPortal()
         }
@@ -115,26 +101,22 @@ Configure the plugin using the `silk { ... }` extension block in your Gradle bui
             authors.set(listOf("Your Name", "Another Author"))
             // contributors.set(listOf("Helpful Contributor"))
             contact.set(mapOf(
-                "homepage" to "[https://your.mod.homepage.com](https://your.mod.homepage.com)",
-                "sources" to "[https://github.com/yourusername/your-mod-repo](https://github.com/yourusername/your-mod-repo)",
-                "issues" to "[https://github.com/yourusername/your-mod-repo/issues](https://github.com/yourusername/your-mod-repo/issues)"
+                "homepage" to "https://your.mod.homepage.com",
+                "sources" to "https://github.com/yourusername/your-mod-repo",
+                "issues" to "https://github.com/yourusername/your-mod-repo/issues"
             ))
             licenses.set(listOf("MIT")) // Or your preferred license ID (e.g., "ARR", "Apache-2.0")
             // iconFile.set("assets/your_mod_id/icon.png") // Path to your mod icon
 
             entrypoints {
                 main.add("com.example.yourmod.YourModMainClass")
-                // client.add("com.example.yourmod.YourModClientClass")
-                // server.add("com.example.yourmod.YourModServerClass") // If applicable
             }
 
             // List of your mixin configuration JSON files
             mixins.add("your_mod_id.mixins.json")
-            // mixins.add("your_mod_id.client.mixins.json")
 
             // Dependencies on other mods or Fabric API
             depends.put("fabricloader", ">=0.15.0") // Recommended Fabric Loader version
-            depends.put("fabric-api", "*")          // Example: Depend on any version of Fabric API
             // depends.put("equilinox", ">=1.X.Y")  // If you target a specific game version range recognized by Fabric
             // recommends.put("another_cool_mod", ">=1.2.0")
 
@@ -169,22 +151,20 @@ Configure the plugin using the `silk { ... }` extension block in your Gradle bui
             authors = ["Your Name", "Another Author"]
             // contributors = ["Helpful Contributor"]
             contact = [
-                homepage: "[https://your.mod.homepage.com](https://your.mod.homepage.com)",
-                sources: "[https://github.com/yourusername/your-mod-repo](https://github.com/yourusername/your-mod-repo)",
-                issues: "[https://github.com/yourusername/your-mod-repo/issues](https://github.com/yourusername/your-mod-repo/issues)"
+                homepage: "https://your.mod.homepage.com",
+                sources: "https://github.com/yourusername/your-mod-repo",
+                issues: "https://github.com/yourusername/your-mod-repo/issues"
             ]
             licenses = ["MIT"]
             // iconFile = "assets/your_mod_id/icon.png"
 
             entrypoints {
                 main.add "com.example.yourmod.YourModMainClass"
-                // client.add "com.example.yourmod.YourModClientClass"
             }
 
             mixins.add "your_mod_id.mixins.json"
 
             depends.put "fabricloader", ">=0.15.0"
-            depends.put "fabric-api", "*"
             // depends.put "equilinox", ">=1.X.Y"
             // recommends.put "another_cool_mod", ">=1.2.0"
 
@@ -240,8 +220,6 @@ The Silk Gradle Plugin configures and adds several useful tasks:
 
 * **`genSources` (Group: `Silk`)**: Decompiles the transformed game JAR using Vineflower. Output is a sources JAR in `build/silk/sources/`.
     * Execute: `./gradlew genSources`
-* **`extractNatives` (Group: `Silk`)**: Extracts native libraries from the game JAR into `build/silk/natives/`. Used by `runGame`.
-    * Execute: `./gradlew extractNatives` (usually run as a dependency of `runGame`)
 * **`runGame` (Group: `Silk`)**: Launches Equilinox with your mod, its dependencies, and required natives and JVM arguments.
     * Working directory is configured by `silk.runDir`.
     * Execute: `./gradlew runGame`
