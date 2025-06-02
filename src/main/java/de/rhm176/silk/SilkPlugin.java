@@ -52,7 +52,7 @@ import org.jetbrains.annotations.NotNull;
  */
 public class SilkPlugin implements Plugin<Project> {
     private static final String FABRIC_MAVEN_URL = "https://maven.fabricmc.net/";
-    private static final String JITPACK_MAVEN_URL = "https://jitpack.io";
+    private static final String RHM_MAVEN_URL = "https://maven.rhm176.de/releases";
 
     /**
      * Applies the Silk plugin to the given Gradle project.
@@ -502,7 +502,7 @@ public class SilkPlugin implements Plugin<Project> {
      */
     private void conditionallyAddRepositories(Project project) {
         boolean fabricMavenExists = false;
-        boolean jitpackMavenExists = false;
+        boolean rhmMavenExists = false;
 
         for (ArtifactRepository repo : project.getRepositories()) {
             if (repo instanceof MavenArtifactRepository mavenRepo) {
@@ -511,8 +511,8 @@ public class SilkPlugin implements Plugin<Project> {
                     repoUrl = repoUrl.substring(0, repoUrl.length() - 1);
                 }
 
-                if (JITPACK_MAVEN_URL.equals(repoUrl)) {
-                    jitpackMavenExists = true;
+                if (RHM_MAVEN_URL.regionMatches(true, 0, repoUrl, 0, RHM_MAVEN_URL.length() - 1)) {
+                    rhmMavenExists = true;
                 }
                 if (FABRIC_MAVEN_URL.regionMatches(true, 0, repoUrl, 0, FABRIC_MAVEN_URL.length() - 1)) {
                     fabricMavenExists = true;
@@ -522,16 +522,16 @@ public class SilkPlugin implements Plugin<Project> {
 
         project.getRepositories().mavenCentral();
 
-        if (!jitpackMavenExists) {
+        if (!rhmMavenExists) {
             project.getRepositories().maven(repo -> {
-                repo.setUrl(URI.create(JITPACK_MAVEN_URL));
-                repo.setName("JitPack");
+                repo.setUrl(URI.create(RHM_MAVEN_URL));
+                repo.setName("RHM's Maven");
             });
         }
         if (!fabricMavenExists) {
             project.getRepositories().maven(repo -> {
                 repo.setUrl(URI.create(FABRIC_MAVEN_URL));
-                repo.setName("FabricMC");
+                repo.setName("FabricMC Maven");
             });
         }
     }
