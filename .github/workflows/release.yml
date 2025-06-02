@@ -66,6 +66,13 @@ jobs:
         id: build_plugin
         run: ./gradlew :jar --stacktrace --warning-mode fail
 
+      - name: Publish plugin
+        run: ./gradlew :publish --stacktrace --warning-mode fail
+        env:
+          REPOSILITE_URL: ${{ secrets.REPOSILITE_URL }}
+          REPOSILITE_USERNAME: ${{ secrets.REPOSILITE_USERNAME }}
+          REPOSILITE_PASSWORD: ${{ secrets.REPOSILITE_PASSWORD }}
+
       - name: Generate Changelog
         id: generate_changelog
         uses: mikepenz/release-changelog-builder-action@v5

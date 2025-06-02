@@ -11,7 +11,7 @@ group = "de.rhm176.silk"
 gradlePlugin {
     plugins {
         create("silkPlugin") {
-            id = "de.rhm176.silk"
+            id = "de.rhm176.silk.silk-plugin"
             implementationClass = "de.rhm176.silk.SilkPlugin"
         }
     }
@@ -43,11 +43,30 @@ java {
 }
 
 publishing {
-    publications {
-        create<MavenPublication>("maven") {
-            from(components["java"])
+    repositories {
+        val reposiliteBaseUrl = System.getenv("REPOSILITE_URL")
+            ?: project.findProperty("reposiliteUrl") as String?
 
-            artifactId = "silk-plugin"
+        if (!reposiliteBaseUrl.isNullOrBlank()) {
+            maven {
+                name = "Reposilite"
+
+                val repoPath = if (project.version.toString().endsWith("-SNAPSHOT")) {
+                    "/snapshots"
+                } else {
+                    "/releases"
+                }
+                url = uri("$reposiliteBaseUrl$repoPath")
+
+                credentials(PasswordCredentials::class.java) {
+                    username = System.getenv("REPOSILITE_USERNAME") ?: project.findProperty("reposiliteUsername") as String?
+                    password = System.getenv("REPOSILITE_PASSWORD") ?: project.findProperty("reposilitePassword") as String?
+                }
+
+                authentication {
+                    create<BasicAuthentication>("basic")
+                }
+            }
         }
     }
 }
