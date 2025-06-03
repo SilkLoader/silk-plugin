@@ -42,9 +42,8 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.GradleException;
-import org.gradle.api.Project;
+import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.RegularFileProperty;
-import org.gradle.api.plugins.JavaPluginExtension;
 import org.gradle.api.provider.ListProperty;
 import org.gradle.api.provider.MapProperty;
 import org.gradle.api.provider.Property;
@@ -285,6 +284,10 @@ public abstract class GenerateFabricJsonTask extends DefaultTask {
     @Input
     public abstract MapProperty<String, Object> getCustomData();
 
+    @InputFiles
+    @PathSensitive(PathSensitivity.RELATIVE)
+    public abstract ConfigurableFileCollection getMainResourceDirectories();
+
     /**
      * The output file where the generated {@code fabric.mod.json} will be written.
      * This property is mandatory.
@@ -317,10 +320,7 @@ public abstract class GenerateFabricJsonTask extends DefaultTask {
     }
 
     private void validateAllInputs(List<String> errors) {
-        Project project = getProject();
-        JavaPluginExtension javaExt = project.getExtensions().getByType(JavaPluginExtension.class);
-        SourceSet mainSS = javaExt.getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
-        Set<File> mainResourceDirs = mainSS.getResources().getSrcDirs();
+        Set<File> mainResourceDirs = getMainResourceDirectories().getFiles();
 
         String id = getId().getOrNull();
         if (id == null || id.trim().isEmpty()) {

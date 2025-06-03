@@ -31,7 +31,7 @@ jobs:
           ref: ${{ github.event.inputs.target_commitish || github.ref }}
           fetch-depth: 0
 
-      - name: Set up JDK (e.g., Temurin 17)
+      - name: Set up JDK
         uses: actions/setup-java@v4.7.1
         with:
           distribution: 'temurin'

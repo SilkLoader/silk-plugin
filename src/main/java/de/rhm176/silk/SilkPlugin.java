@@ -211,6 +211,9 @@ public class SilkPlugin implements Plugin<Project> {
                     task.getCustomData().set(manifestConfig.getCustomData());
                     task.getShouldVerify().set(extension.getVerifyFabricModJson());
 
+                    task.getMainResourceDirectories()
+                            .from(mainSourceSet.getResources().getSrcDirs());
+
                     task.getOutputFile().set(generatedFabricModJsonDir.map(d -> d.file("fabric.mod.json")));
                 });
         processResourcesTask.configure(processResources -> {
@@ -497,10 +500,9 @@ public class SilkPlugin implements Plugin<Project> {
             File manualFabricModJsonFile = new File(mainResourcesDir, "fabric.mod.json");
 
             if (isGenerationEnabled && manualFabricModJsonFile.exists()) {
-                throw new GradleException(
-                        "Silk Plugin: 'silk.generateFabricModJson' is true, but '"
-                                + manualFabricModJsonFile.getPath() + "' "
-                                + "also exists. Please either remove the manual file or set 'generateFabricModJson = false'.");
+                throw new GradleException("Silk Plugin: 'silk.generateFabricModJson' is true, but '"
+                        + manualFabricModJsonFile.getPath() + "' "
+                        + "also exists. Please either remove the manual file or set 'generateFabricModJson = false'.");
             }
         });
     }
