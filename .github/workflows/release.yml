@@ -137,3 +137,4 @@ jobs:
           prerelease: ${{ github.event.inputs.is_prerelease }}
           commit: ${{ github.event.inputs.target_commitish || github.ref }}
           artifacts: "./build/libs/silk-plugin-${{ steps.read_version.outputs.release_version }}.jar"
+          artifactContentType: application/java-archive
