@@ -108,12 +108,6 @@ public abstract class ModifyFabricModJsonTask extends DefaultTask {
             return;
         }
 
-        if (!inputFile.exists()) {
-            throw new GradleException("Silk: Cannot modify fabric.mod.json. Input file '" + inputFile.getAbsolutePath()
-                    + "' does not exist, but there are subproject JARs to bundle: " + bundledJarFileNames
-                    + ". Ensure fabric.mod.json is generated or manually provided in src/main/resources.");
-        }
-
         ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.enable(SerializationFeature.INDENT_OUTPUT);
 
