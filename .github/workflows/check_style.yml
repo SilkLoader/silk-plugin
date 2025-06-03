@@ -1,4 +1,4 @@
-name: Check Style
+name: PR Checks
 
 on:
   pull_request:
@@ -7,11 +7,10 @@ on:
 
 permissions:
   contents: read
-  pull-requests: read
 
 jobs:
-  check_style:
-    name: Check Java style
+  check_and_build:
+    name: Check Style and Build
     runs-on: ubuntu-latest
 
     steps:
@@ -23,10 +22,8 @@ jobs:
         with:
           distribution: 'temurin'
           java-version: '17'
+          cache: 'gradle'
 
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v4.3.1
-
-      - name: Run spotlessCheck
-        id: spotless_check
-        run: ./gradlew spotlessCheck --stacktrace
+      - name: Build and Test
+        id: build_project
+        run: ./gradlew build --stacktrace
