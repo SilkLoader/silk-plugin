@@ -114,11 +114,8 @@ public abstract class ModifyFabricModJsonTask extends DefaultTask {
         try {
             JsonNode rootNode = objectMapper.readTree(inputFile);
             if (!rootNode.isObject()) {
-                getLogger()
-                        .error(
-                                "Silk: fabric.mod.json content at {} is not a JSON object. Skipping modification.",
-                                inputFile.getAbsolutePath());
-                return;
+                throw new GradleException("Silk: fabric.mod.json content at " + inputFile.getAbsolutePath()
+                        + " is not a JSON object. Skipping modification.");
             }
             ObjectNode objectNode = (ObjectNode) rootNode;
 

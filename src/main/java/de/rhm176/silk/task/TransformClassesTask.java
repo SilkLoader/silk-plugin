@@ -201,11 +201,8 @@ public abstract class TransformClassesTask extends DefaultTask {
                     processFabricModJsonStream(
                             is, sourceFileOrJar.getAbsolutePath(), interfaceMappings, allRawAwRulesList, null);
                 } catch (IOException e) {
-                    getLogger()
-                            .error(
-                                    "Silk: Failed to read direct fabric.mod.json: {}",
-                                    sourceFileOrJar.getAbsolutePath(),
-                                    e);
+                    throw new GradleException(
+                            "Silk: Failed to read direct fabric.mod.json: " + sourceFileOrJar.getAbsolutePath(), e);
                 }
             } else if (sourceFileOrJar.isFile()
                     && sourceFileOrJar.getName().toLowerCase().endsWith(".jar")) {
@@ -375,12 +372,11 @@ public abstract class TransformClassesTask extends DefaultTask {
                         outRawAwRulesList.addAll(widener.getRules());
                     }
                 } catch (IOException | GradleException e) {
-                    getLogger()
-                            .error(
-                                    "Silk: Failed to load or parse AccessWidener '{}' referenced by {}: {}",
-                                    awPath,
-                                    fmjSourceDescription,
-                                    e.getMessage());
+                    throw new GradleException(
+                            String.format(
+                                    "Silk: Failed to load or parse AccessWidener '%s' referenced by %s: %s",
+                                    awPath, fmjSourceDescription, e.getMessage()),
+                            e);
                 }
             }
         }
