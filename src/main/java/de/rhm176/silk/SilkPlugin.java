@@ -213,7 +213,13 @@ public class SilkPlugin implements Plugin<Project> {
 
                     task.getOutputFile().set(generatedFabricModJsonDir.map(d -> d.file("fabric.mod.json")));
                 });
-        processResourcesTask.configure(processResources -> processResources.dependsOn(generateFabricModJson));
+        processResourcesTask.configure(processResources -> {
+            processResources.dependsOn(generateFabricModJson);
+
+            Provider<RegularFile> fabricModJsonOutput =
+                    generateFabricModJson.flatMap(GenerateFabricJsonTask::getOutputFile);
+            processResources.from(fabricModJsonOutput);
+        });
 
         Configuration compileClasspath =
                 project.getConfigurations().getByName(JavaPlugin.COMPILE_CLASSPATH_CONFIGURATION_NAME);
@@ -416,7 +422,16 @@ public class SilkPlugin implements Plugin<Project> {
 
             task.setWorkingDir(extension.getRunDir().getAsFile());
 
-            TaskProvider<Jar> jarTaskProvider = project.getTasks().named("jar", Jar.class);
+            TaskProvider<Jar> jarTaskProvider = project.getTasks().named(JavaPlugin.JAR_TASK_NAME, Jar.class);
+
+            project.getTasks().named("sourcesJar", Jar.class).configure((sourcesJarTask) -> {
+                sourcesJarTask.dependsOn(generateFabricModJson);
+                sourcesJarTask.dependsOn(modifyFabricModJsonTask);
+            });
+            project.getTasks().named("javadocJar", Jar.class).configure((javadocJarTask) -> {
+                javadocJarTask.dependsOn(generateFabricModJson);
+                javadocJarTask.dependsOn(modifyFabricModJsonTask);
+            });
             Provider<RegularFile> modJarFileProvider = jarTaskProvider.flatMap(Jar::getArchiveFile);
 
             task.classpath(
@@ -481,15 +496,11 @@ public class SilkPlugin implements Plugin<Project> {
                     currentMainSourceSet.getResources().getSrcDirs().iterator().next();
             File manualFabricModJsonFile = new File(mainResourcesDir, "fabric.mod.json");
 
-            if (isGenerationEnabled) {
-                currentMainSourceSet.getResources().srcDir(generatedFabricModJsonDir);
-
-                if (manualFabricModJsonFile.exists()) {
-                    throw new GradleException(
-                            "Silk Plugin: 'silk.generateFabricModJson' is true, but '"
-                                    + manualFabricModJsonFile.getPath() + "' "
-                                    + "also exists. Please either remove the manual file or set 'generateFabricModJson = false'.");
-                }
+            if (isGenerationEnabled && manualFabricModJsonFile.exists()) {
+                throw new GradleException(
+                        "Silk Plugin: 'silk.generateFabricModJson' is true, but '"
+                                + manualFabricModJsonFile.getPath() + "' "
+                                + "also exists. Please either remove the manual file or set 'generateFabricModJson = false'.");
             }
         });
     }
