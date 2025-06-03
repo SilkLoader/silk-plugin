@@ -384,6 +384,21 @@ public class SilkPlugin implements Plugin<Project> {
             return project.files(jarTaskOutputs);
         });
 
+        project.getTasks()
+                .withType(Jar.class)
+                .matching(jarTask -> jarTask.getName().equals("sourcesJar"))
+                .configureEach(sourcesJarTask -> {
+                    sourcesJarTask.dependsOn(generateFabricModJson);
+                    sourcesJarTask.dependsOn(modifyFabricModJsonTask);
+                });
+        project.getTasks()
+                .withType(Jar.class)
+                .matching(jarTask -> jarTask.getName().equals("javadocJar"))
+                .configureEach(javadocJarTask -> {
+                    javadocJarTask.dependsOn(generateFabricModJson);
+                    javadocJarTask.dependsOn(modifyFabricModJsonTask);
+                });
+
         project.getTasks().named("jar", Jar.class, jarTask -> {
             jarTask.dependsOn(modifyFabricModJsonTask);
 
@@ -426,15 +441,6 @@ public class SilkPlugin implements Plugin<Project> {
             task.setWorkingDir(extension.getRunDir().getAsFile());
 
             TaskProvider<Jar> jarTaskProvider = project.getTasks().named(JavaPlugin.JAR_TASK_NAME, Jar.class);
-
-            project.getTasks().named("sourcesJar", Jar.class).configure((sourcesJarTask) -> {
-                sourcesJarTask.dependsOn(generateFabricModJson);
-                sourcesJarTask.dependsOn(modifyFabricModJsonTask);
-            });
-            project.getTasks().named("javadocJar", Jar.class).configure((javadocJarTask) -> {
-                javadocJarTask.dependsOn(generateFabricModJson);
-                javadocJarTask.dependsOn(modifyFabricModJsonTask);
-            });
             Provider<RegularFile> modJarFileProvider = jarTaskProvider.flatMap(Jar::getArchiveFile);
 
             task.classpath(
