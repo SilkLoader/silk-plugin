@@ -9,8 +9,8 @@ permissions:
   contents: read
 
 jobs:
-  check_and_build:
-    name: Check Style and Build
+  validate_pr:
+    name: Validate Pull Request
     runs-on: ubuntu-latest
 
     steps:
@@ -24,6 +24,11 @@ jobs:
           java-version: '17'
           cache: 'gradle'
 
-      - name: Build and Test
-        id: build_project
-        run: ./gradlew build --stacktrace
+      - name: Check style
+        id: check_style
+        run: ./gradlew spotlessCheck --stacktrace
+
+      - name: Run tests
+        id: run_tests
+        run: ./gradlew test --stacktrace
+        if: success()
