@@ -277,8 +277,10 @@ public abstract class TransformClassesTask extends DefaultTask {
 
     private void mergeMappings(Map<String, List<String>> targetMap, Map<String, List<String>> newMappings) {
         newMappings.forEach((className, interfaces) -> {
-            targetMap.computeIfAbsent(className, k -> new ArrayList<>()).addAll(interfaces);
-            targetMap.put(className, targetMap.get(className).stream().sorted().toList());
+            List<String> existingList = targetMap.computeIfAbsent(className, k -> new ArrayList<>());
+            existingList.addAll(interfaces);
+            Collections.sort(existingList);
+            targetMap.put(className, existingList);
         });
     }
 
