@@ -39,7 +39,9 @@ import org.gradle.api.provider.ListProperty;
 import org.gradle.api.tasks.*;
 import org.gradle.process.ExecOperations;
 import org.jetbrains.annotations.NotNull;
+import org.jetbrains.annotations.VisibleForTesting;
 
+// probably will not create tests for this (yet)
 /**
  * A Gradle task that decompiles a given game JAR using the Vineflower decompiler
  * and packages the resulting source files into a sources JAR.
@@ -200,7 +202,8 @@ public abstract class GenerateSourcesTask extends DefaultTask {
      * @param userProvidedArgs A list of arguments provided by the user via the {@link #getVineflowerArgs()} property.
      * @return A {@link NotNull} list of strings representing the complete arguments for Vineflower.
      */
-    private static @NotNull List<String> constructVineflowerArgs(
+    @VisibleForTesting
+    public static @NotNull List<String> constructVineflowerArgs(
             File gameJarFile, File tempDecompiledDir, List<String> userProvidedArgs) {
         Map<String, String> mergedArgs = new LinkedHashMap<>();
 

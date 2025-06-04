@@ -25,13 +25,11 @@ import de.rhm176.silk.extension.FabricExtension;
 import de.rhm176.silk.extension.VineflowerExtension;
 import java.io.File;
 import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
+import java.nio.file.*;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.jar.JarFile;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -48,6 +46,7 @@ import org.gradle.api.model.ObjectFactory;
 import org.gradle.api.provider.Property;
 import org.gradle.api.provider.Provider;
 import org.jetbrains.annotations.ApiStatus;
+import org.jetbrains.annotations.VisibleForTesting;
 
 /**
  * Configuration extension for the Silk Gradle plugin.
@@ -114,7 +113,8 @@ public abstract class SilkExtension {
     // If the game can't be found by name, it will search all jars in the
     // Equilinox install dir and if all of the listed classes are found,
     // the jar is determined to be the game.
-    private static final List<String> equilinoxClassFiles = List.of("main/MainApp.class", "main/FirstScreenUi.class");
+    @VisibleForTesting
+    static final List<String> EQUILINOX_CLASS_FILES = List.of("main/MainApp.class", "main/FirstScreenUi.class");
 
     private Provider<RegularFile> internalGameJarProvider;
     private final DirectoryProperty runDir;
@@ -128,7 +128,8 @@ public abstract class SilkExtension {
     private final Property<Object> silkLoaderCoordinates;
     private final Property<String> silkLoaderMainClassOverride;
 
-    private FileCollection cachedEquilinoxGameJarFc = null;
+    @VisibleForTesting
+    FileCollection cachedEquilinoxGameJarFc = null;
 
     /**
      * @param objectFactory The Gradle {@link ObjectFactory} service, used for creating domain objects.
@@ -476,22 +477,29 @@ public abstract class SilkExtension {
                 "Silk plugin: Could not automatically find Equilinox game JAR. " + "Searched common Steam locations.");
     }
 
-    private boolean isCorrectGameJarByContent(Path jarPath) {
-        if (!jarPath.toString().toLowerCase().endsWith(".jar")) return false;
+    @VisibleForTesting
+    boolean isCorrectGameJarByContent(Path jarPath) {
+        if (!Files.isRegularFile(jarPath) || !jarPath.toString().toLowerCase().endsWith(".jar")) {
+            return false;
+        }
 
-        try (JarFile jarFile = new JarFile(jarPath.toFile())) {
-            for (String classEntry : equilinoxClassFiles) {
-                if (jarFile.getJarEntry(classEntry) == null) {
+        try (FileSystem jarFs = FileSystems.newFileSystem(jarPath, Map.of())) {
+            for (String classEntry : EQUILINOX_CLASS_FILES) {
+                Path entryPathInJar = jarFs.getPath(classEntry);
+                if (Files.notExists(entryPathInJar)) {
                     return false;
                 }
             }
             return true;
         } catch (IOException e) {
+            project.getLogger()
+                    .debug("Silk: Could not inspect JAR file {} for content matching: {}", jarPath, e.getMessage());
             return false;
         }
     }
 
-    private List<Path> findSteamLibraryRoots(String os) {
+    @VisibleForTesting
+    protected List<Path> findSteamLibraryRoots(String os) {
         List<Path> roots = new ArrayList<>();
         String userHome = System.getProperty("user.home");
 

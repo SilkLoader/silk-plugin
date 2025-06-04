@@ -51,6 +51,15 @@ import org.jetbrains.annotations.NotNull;
  * Main plugin class for Silk, a Gradle plugin to facilitate mod development for Equilinox.
  */
 public class SilkPlugin implements Plugin<Project> {
+    public static final String MODIFY_FABRIC_MOD_JSON_TASK_NAME = "modifyFabricModJson";
+    public static final String TRANSFORM_CLASSES_TASK_NAME = "transformGameClasses";
+    public static final String EXTRACT_NATIVES_TASK_NAME = "extractNatives";
+    public static final String GENERATE_FABRIC_MOD_JSON_TASK_NAME = "generateFabricModJson";
+    public static final String GENERATE_SOURCES_TASK_NAME = "genSources";
+    public static final String RUN_GAME_TASK_NAME = "runGame";
+
+    public static final String EQUILINOX_CONFIGURATION_NAME = "equilinox";
+
     private static final String FABRIC_MAVEN_URL = "https://maven.fabricmc.net/";
     private static final String RHM_MAVEN_URL = "https://maven.rhm176.de/releases";
 
@@ -65,13 +74,14 @@ public class SilkPlugin implements Plugin<Project> {
 
         conditionallyAddRepositories(project);
 
-        Configuration equilinoxConfiguration = project.getConfigurations().create("equilinox", config -> {
-            config.setDescription("The game JAR for Silk, e.g., EquilinoxWindows.jar.");
-            config.setVisible(true);
-            config.setCanBeConsumed(false);
-            config.setCanBeResolved(true);
-            config.setTransitive(false);
-        });
+        Configuration equilinoxConfiguration = project.getConfigurations()
+                .create(EQUILINOX_CONFIGURATION_NAME, config -> {
+                    config.setDescription("The game JAR for Silk, e.g., EquilinoxWindows.jar.");
+                    config.setVisible(true);
+                    config.setCanBeConsumed(false);
+                    config.setCanBeResolved(true);
+                    config.setTransitive(false);
+                });
 
         SilkExtension extension = project.getExtensions().create("silk", SilkExtension.class, project);
         extension.initializeGameJarProvider(equilinoxConfiguration, project);
@@ -181,7 +191,7 @@ public class SilkPlugin implements Plugin<Project> {
                 project.getLayout().getBuildDirectory().dir("generated/silk/resources/" + mainSourceSet.getName());
 
         TaskProvider<GenerateFabricJsonTask> generateFabricModJson = project.getTasks()
-                .register("generateFabricModJson", GenerateFabricJsonTask.class, task -> {
+                .register(GENERATE_FABRIC_MOD_JSON_TASK_NAME, GenerateFabricJsonTask.class, task -> {
                     task.setDescription("Generates the fabric.mod.json file from silk.fabricManifest configuration.");
                     task.setGroup(null);
 
@@ -228,7 +238,7 @@ public class SilkPlugin implements Plugin<Project> {
                 project.getConfigurations().getByName(JavaPlugin.COMPILE_CLASSPATH_CONFIGURATION_NAME);
 
         TaskProvider<ModifyFabricModJsonTask> modifyFabricModJsonTask = project.getTasks()
-                .register("modifyFabricModJson", ModifyFabricModJsonTask.class, task -> {
+                .register(MODIFY_FABRIC_MOD_JSON_TASK_NAME, ModifyFabricModJsonTask.class, task -> {
                     task.setGroup(null);
                     task.setDescription("Adds bundled submod JAR references to fabric.mod.json.");
 
@@ -265,11 +275,11 @@ public class SilkPlugin implements Plugin<Project> {
                 });
 
         TaskProvider<TransformClassesTask> transformGameClassesTaskProvider = project.getTasks()
-                .register("transformGameClasses", TransformClassesTask.class, task -> {
+                .register(TRANSFORM_CLASSES_TASK_NAME, TransformClassesTask.class, task -> {
                     task.setGroup(null);
 
                     for (Project subProject : extension.getRegisteredSubprojectsInternal()) {
-                        task.dependsOn(subProject.getTasksByName("modifyFabricModJson", false));
+                        task.dependsOn(subProject.getTasksByName(MODIFY_FABRIC_MOD_JSON_TASK_NAME, false));
                     }
                     task.dependsOn(modifyFabricModJsonTask);
 
@@ -342,7 +352,7 @@ public class SilkPlugin implements Plugin<Project> {
             config.getDependencies().addLater(vineflowerDependency);
         });
 
-        project.getTasks().register("genSources", GenerateSourcesTask.class, task -> {
+        project.getTasks().register(GENERATE_SOURCES_TASK_NAME, GenerateSourcesTask.class, task -> {
             task.setGroup("Silk");
             task.setDescription("Decompiles the game JAR using Vineflower to produce a sources JAR.");
 
@@ -359,7 +369,7 @@ public class SilkPlugin implements Plugin<Project> {
 
         Provider<Directory> nativesDir = project.getLayout().getBuildDirectory().dir("silk/natives");
         TaskProvider<ExtractNativesTask> extractNativesTaskProvider = project.getTasks()
-                .register("extractNatives", ExtractNativesTask.class, task -> {
+                .register(EXTRACT_NATIVES_TASK_NAME, ExtractNativesTask.class, task -> {
                     task.setGroup("Silk");
                     task.setDescription("Extracts native libraries from the game JAR.");
                     task.getInputJar().set(extension.getGameJar());
@@ -405,7 +415,7 @@ public class SilkPlugin implements Plugin<Project> {
             jarTask.from(subprojectOutputFilesProvider, copySpec -> copySpec.into("META-INF/jars/"));
         });
 
-        project.getTasks().register("runGame", JavaExec.class, task -> {
+        project.getTasks().register(RUN_GAME_TASK_NAME, JavaExec.class, task -> {
             task.setGroup("Silk");
             task.setDescription("Runs the game.");
 
@@ -419,18 +429,20 @@ public class SilkPlugin implements Plugin<Project> {
                 String mainClass = effectiveLoaderMainClass.getOrNull();
                 if (mainClass == null || mainClass.trim().isEmpty()) {
                     project.getLogger()
-                            .warn(
-                                    "Silk: 'runGame' task is unavailable because Silk Loader main class could not be determined. "
-                                            + "Please ensure 'silk.silkLoaderCoordinates' is set correctly and resolves to a JAR with a Main-Class, "
-                                            + "or provide 'silk.silkLoaderMainClassOverride'.");
+                            .warn("Silk: '" + RUN_GAME_TASK_NAME
+                                    + "' task is unavailable because Silk Loader main class could not be determined. "
+                                    + "Please ensure 'silk.silkLoaderCoordinates' is set correctly and resolves to a JAR with a Main-Class, "
+                                    + "or provide 'silk.silkLoaderMainClassOverride'.");
                     return false;
                 }
 
                 if (!gameJarProvider.isPresent() || !gameJarProvider.get().exists()) {
                     project.getLogger()
                             .warn(
-                                    "Silk: 'runGame' task is unavailable because the transformed game JAR file does not exist at the expected location: {}. "
-                                            + "Please ensure the 'transformGameClasses' task completed successfully and created this output.",
+                                    "Silk: '" + RUN_GAME_TASK_NAME
+                                            + "' task is unavailable because the transformed game JAR file does not exist at the expected location: {}. "
+                                            + "Please ensure the '" + TRANSFORM_CLASSES_TASK_NAME
+                                            + "' task completed successfully and created this output.",
                                     gameJarProvider.get().getAbsolutePath());
                     return false;
                 }

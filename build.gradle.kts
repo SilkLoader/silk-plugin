@@ -24,8 +24,25 @@ repositories {
 dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind:${project.property("jacksonVersion")}")
     implementation("org.ow2.asm:asm:${project.property("asmVersion")}")
+    implementation("org.ow2.asm:asm-tree:${project.property("asmVersion")}")
 
     compileOnly("org.jetbrains:annotations:${project.property("annotationsVersion")}")
+
+    testImplementation(gradleTestKit())
+
+    testImplementation("com.github.stefanbirkner:system-lambda:${project.property("systemLambdaVersion")}")
+    testImplementation("com.google.jimfs:jimfs:${project.property("jimfsVersion")}")
+
+    testImplementation(platform("org.junit:junit-bom:${project.property("junitVersion")}"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+
+    testImplementation("org.mockito:mockito-core:${project.property("mockitoVersion")}")
+    testImplementation("org.mockito:mockito-junit-jupiter:${project.property("mockitoVersion")}")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 java {
