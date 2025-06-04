@@ -737,6 +737,8 @@ public abstract class GenerateFabricJsonTask extends DefaultTask {
             }
         }
 
+        putMapIfPresent(rootNode, "contact", getContact());
+
         Map<String, String> iconSet = getIconSet().getOrElse(Collections.emptyMap());
         String iconFile = getIconFile().getOrNull();
         if (!iconSet.isEmpty()) {
