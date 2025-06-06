@@ -51,6 +51,10 @@ import org.jetbrains.annotations.NotNull;
  * Main plugin class for Silk, a Gradle plugin to facilitate mod development for Equilinox.
  */
 public class SilkPlugin implements Plugin<Project> {
+    interface SilkRootMarker {
+
+    }
+
     public static final String MODIFY_FABRIC_MOD_JSON_TASK_NAME = "modifyFabricModJson";
     public static final String TRANSFORM_CLASSES_TASK_NAME = "transformGameClasses";
     public static final String EXTRACT_NATIVES_TASK_NAME = "extractNatives";
@@ -71,6 +75,10 @@ public class SilkPlugin implements Plugin<Project> {
     @Override
     public void apply(@NotNull Project project) {
         project.getPluginManager().apply("java-library");
+
+        if (project == project.getRootProject()) {
+            project.getExtensions().create("silkRootMarker", SilkRootMarker.class);
+        }
 
         conditionallyAddRepositories(project);
 
@@ -278,59 +286,67 @@ public class SilkPlugin implements Plugin<Project> {
                 .register(TRANSFORM_CLASSES_TASK_NAME, TransformClassesTask.class, task -> {
                     task.setGroup(null);
 
-                    for (Project subProject : extension.getRegisteredSubprojectsInternal()) {
-                        task.dependsOn(subProject.getTasksByName(MODIFY_FABRIC_MOD_JSON_TASK_NAME, false));
+                    if (project == project.getRootProject() || project.getRootProject().getExtensions().findByType(SilkRootMarker.class) == null) {
+                        for (Project subProject : extension.getRegisteredSubprojectsInternal()) {
+                            task.dependsOn(subProject.getTasksByName(MODIFY_FABRIC_MOD_JSON_TASK_NAME, false));
+                        }
+                        task.dependsOn(modifyFabricModJsonTask);
+
+                        task.getInputJar().set(extension.getGameJar());
+
+                        Provider<File> currentProjectModJsonProvider =
+                                processResourcesTask.map(t -> new File(t.getDestinationDir(), "fabric.mod.json"));
+                        task.getModConfigurationSources().from(currentProjectModJsonProvider);
+
+                        for (Project subProject : extension.getRegisteredSubprojectsInternal()) {
+                            subProject.getPlugins().withId("java", appliedJavaPlugin -> {
+                                JavaPluginExtension subJavaExt =
+                                        subProject.getExtensions().getByType(JavaPluginExtension.class);
+                                SourceSet subMainSS = subJavaExt.getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
+                                String subProcessResourcesTaskName = subMainSS.getProcessResourcesTaskName();
+
+                                if (subProject.getTasks().getNames().contains(subProcessResourcesTaskName)) {
+                                    TaskProvider<ProcessResources> subProcessResourcesTask = subProject
+                                            .getTasks()
+                                            .named(subProcessResourcesTaskName, ProcessResources.class);
+
+                                    Provider<RegularFile> subModJsonProvider = subProject
+                                            .getLayout()
+                                            .file(subProcessResourcesTask.map(
+                                                    prTask -> new File(prTask.getDestinationDir(), "fabric.mod.json")));
+                                    task.getModConfigurationSources().from(subModJsonProvider);
+                                } else {
+                                    project.getLogger()
+                                            .warn(
+                                                    "Silk: Subproject {} does not have a '{}' task. Cannot find its fabric.mod.json for class transformation.",
+                                                    subProject.getPath(),
+                                                    subProcessResourcesTaskName);
+                                }
+                            });
+                        }
+
+                        Provider<Set<File>> dependencyJarsProvider = compileClasspath
+                                .getIncoming()
+                                .getArtifacts()
+                                .getResolvedArtifacts()
+                                .map(resolvedArtifactSet -> resolvedArtifactSet.stream()
+                                        .map(ResolvedArtifactResult::getFile)
+                                        .filter(file -> file.getName().endsWith(".jar") && file.isFile())
+                                        .collect(Collectors.toSet()));
+                        task.getModConfigurationSources().from(dependencyJarsProvider);
+
+                        Provider<RegularFile> gameJarProvider = extension.getGameJar();
+                        task.getOutputTransformedJar().set(gameJarProvider.flatMap(jar -> project.getLayout()
+                                .getBuildDirectory()
+                                .file("silk/transformed-jars/"
+                                        + jar.getAsFile().getName().replace(".jar", "") + "-transformed.jar")));
+                    } else {
+                        task.setEnabled(false);
+                        task.getOutputTransformedJar().set(project.getRootProject()
+                                .getTasks()
+                                .named(TRANSFORM_CLASSES_TASK_NAME, TransformClassesTask.class)
+                                .flatMap(TransformClassesTask::getOutputTransformedJar));
                     }
-                    task.dependsOn(modifyFabricModJsonTask);
-
-                    task.getInputJar().set(extension.getGameJar());
-
-                    Provider<File> currentProjectModJsonProvider =
-                            processResourcesTask.map(t -> new File(t.getDestinationDir(), "fabric.mod.json"));
-                    task.getModConfigurationSources().from(currentProjectModJsonProvider);
-
-                    for (Project subProject : extension.getRegisteredSubprojectsInternal()) {
-                        subProject.getPlugins().withId("java", appliedJavaPlugin -> {
-                            JavaPluginExtension subJavaExt =
-                                    subProject.getExtensions().getByType(JavaPluginExtension.class);
-                            SourceSet subMainSS = subJavaExt.getSourceSets().getByName(SourceSet.MAIN_SOURCE_SET_NAME);
-                            String subProcessResourcesTaskName = subMainSS.getProcessResourcesTaskName();
-
-                            if (subProject.getTasks().getNames().contains(subProcessResourcesTaskName)) {
-                                TaskProvider<ProcessResources> subProcessResourcesTask = subProject
-                                        .getTasks()
-                                        .named(subProcessResourcesTaskName, ProcessResources.class);
-
-                                Provider<RegularFile> subModJsonProvider = subProject
-                                        .getLayout()
-                                        .file(subProcessResourcesTask.map(
-                                                prTask -> new File(prTask.getDestinationDir(), "fabric.mod.json")));
-                                task.getModConfigurationSources().from(subModJsonProvider);
-                            } else {
-                                project.getLogger()
-                                        .warn(
-                                                "Silk: Subproject {} does not have a '{}' task. Cannot find its fabric.mod.json for class transformation.",
-                                                subProject.getPath(),
-                                                subProcessResourcesTaskName);
-                            }
-                        });
-                    }
-
-                    Provider<Set<File>> dependencyJarsProvider = compileClasspath
-                            .getIncoming()
-                            .getArtifacts()
-                            .getResolvedArtifacts()
-                            .map(resolvedArtifactSet -> resolvedArtifactSet.stream()
-                                    .map(ResolvedArtifactResult::getFile)
-                                    .filter(file -> file.getName().endsWith(".jar") && file.isFile())
-                                    .collect(Collectors.toSet()));
-                    task.getModConfigurationSources().from(dependencyJarsProvider);
-
-                    Provider<RegularFile> gameJarProvider = extension.getGameJar();
-                    task.getOutputTransformedJar().set(gameJarProvider.flatMap(jar -> project.getLayout()
-                            .getBuildDirectory()
-                            .file("silk/transformed-jars/"
-                                    + jar.getAsFile().getName().replace(".jar", "") + "-transformed.jar")));
                 });
 
         project.getTasks()

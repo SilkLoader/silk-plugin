@@ -98,12 +98,6 @@ public abstract class SilkExtension {
                         .warn("Silk: Attempted to register a null subproject in 'silk.mods.register()'.");
                 return;
             }
-            if (!subProject.getPluginManager().hasPlugin("")) {
-                rootProject
-                        .getLogger()
-                        .warn("Silk: Attempted to register a subproject which does not have the silk-plugin applied in 'silk.mods.register()'.");
-                return;
-            }
             if (!targetList.contains(subProject)) {
                 targetList.add(subProject);
             } else {
