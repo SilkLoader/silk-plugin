@@ -528,6 +528,12 @@ public class SilkPlugin implements Plugin<Project> {
 
         project.afterEvaluate(evaluatedProject -> {
             SilkExtension currentExtension = evaluatedProject.getExtensions().getByType(SilkExtension.class);
+
+            currentExtension.getRegisteredSubprojectsInternal().forEach(subProject -> evaluatedProject.getDependencies().add(
+                    JavaPlugin.COMPILE_ONLY_API_CONFIGURATION_NAME,
+                    subProject
+            ));
+
             boolean isGenerationEnabled =
                     currentExtension.getGenerateFabricModJson().getOrElse(false);
             SourceSet currentMainSourceSet = evaluatedProject
