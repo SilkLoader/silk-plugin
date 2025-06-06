@@ -35,7 +35,6 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
 import java.util.*;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.jar.JarEntry;
 import java.util.jar.JarOutputStream;
 import java.util.stream.Collectors;
@@ -258,21 +257,18 @@ class SilkExtensionTest {
         createTemporaryGameJar(
                 gameDir, "EquilinoxWindows.jar", List.of("main/MainApp.class", "main/FirstScreenUi.class"));
 
+        SilkExtension spiedExtension = spy(this.silkExtension);
+
+        doReturn(Collections.singletonList(fakeSteamRoot)).when(spiedExtension).findSteamLibraryRoots(anyString());
         SystemLambda.restoreSystemProperties(() -> {
             System.setProperty("os.name", "windows");
 
-            SilkExtension localSilkExtension = new SilkExtension(project.getObjects(), project) {
-                @Override
-                protected List<Path> findSteamLibraryRoots(String os) {
-                    assertEquals("windows", os.toLowerCase());
-                    return Collections.singletonList(fakeSteamRoot);
-                }
-            };
-
-            FileCollection gameJarFc = localSilkExtension.findEquilinoxGameJar();
+            FileCollection gameJarFc = spiedExtension.findEquilinoxGameJar();
             assertNotNull(gameJarFc);
             assertFalse(gameJarFc.isEmpty());
             assertEquals("EquilinoxWindows.jar", gameJarFc.getSingleFile().getName());
+
+            verify(spiedExtension).findSteamLibraryRoots("windows");
         });
     }
 
@@ -282,23 +278,20 @@ class SilkExtensionTest {
         Path fakeSteamRoot = projectDir.resolve("MyFakeSteamLib");
         Path gameDir = fakeSteamRoot.resolve("steamapps/common/Equilinox");
         Files.createDirectories(gameDir);
-        createTemporaryGameJar(gameDir, "SomeGame.jar", List.of("main/MainApp.class", "main/FirstScreenUi.class"));
+        createTemporaryGameJar(gameDir, "SomeGame.jar", SilkExtension.EQUILINOX_CLASS_FILES);
+
+        SilkExtension spiedExtension = spy(this.silkExtension);
+        doReturn(Collections.singletonList(fakeSteamRoot)).when(spiedExtension).findSteamLibraryRoots(anyString());
 
         SystemLambda.restoreSystemProperties(() -> {
             System.setProperty("os.name", "linux");
 
-            SilkExtension localSilkExtension = new SilkExtension(project.getObjects(), project) {
-                @Override
-                protected List<Path> findSteamLibraryRoots(String os) {
-                    assertEquals("linux", os.toLowerCase());
-                    return Collections.singletonList(fakeSteamRoot);
-                }
-            };
-
-            FileCollection gameJarFc = localSilkExtension.findEquilinoxGameJar();
+            FileCollection gameJarFc = spiedExtension.findEquilinoxGameJar();
             assertNotNull(gameJarFc);
             assertFalse(gameJarFc.isEmpty());
             assertEquals("SomeGame.jar", gameJarFc.getSingleFile().getName());
+
+            verify(spiedExtension).findSteamLibraryRoots("linux");
         });
     }
 
@@ -308,18 +301,13 @@ class SilkExtensionTest {
         Path fakeSteamRoot = projectDir.resolve("EmptySteamLib");
         Files.createDirectories(fakeSteamRoot.resolve("steamapps/common/Equilinox"));
 
+        SilkExtension spiedExtension = spy(this.silkExtension);
+        doReturn(Collections.singletonList(fakeSteamRoot)).when(spiedExtension).findSteamLibraryRoots(anyString());
+
         SystemLambda.restoreSystemProperties(() -> {
             System.setProperty("os.name", "mac os x");
 
-            SilkExtension localSilkExtension = new SilkExtension(project.getObjects(), project) {
-                @Override
-                protected List<Path> findSteamLibraryRoots(String os) {
-                    assertEquals("mac os x", os.toLowerCase());
-                    return Collections.singletonList(fakeSteamRoot);
-                }
-            };
-
-            Exception exception = assertThrows(GradleException.class, localSilkExtension::findEquilinoxGameJar);
+            Exception exception = assertThrows(GradleException.class, spiedExtension::findEquilinoxGameJar);
             assertTrue(exception.getMessage().contains("Could not automatically find Equilinox game JAR"));
         });
     }
@@ -330,34 +318,25 @@ class SilkExtensionTest {
         Path fakeSteamRoot = projectDir.resolve("CacheSteamLib");
         Path gameDir = fakeSteamRoot.resolve("steamapps/common/Equilinox");
         Files.createDirectories(gameDir);
-        File gameJarFile = createTemporaryGameJar(
-                gameDir, "Equilinox.jar", List.of("main/MainApp.class", "main/FirstScreenUi.class"));
+        createTemporaryGameJar(gameDir, "Equilinox.jar", SilkExtension.EQUILINOX_CLASS_FILES);
+
+        SilkExtension spiedExtension = spy(this.silkExtension);
+        doReturn(Collections.singletonList(fakeSteamRoot)).when(spiedExtension).findSteamLibraryRoots(anyString());
 
         SystemLambda.restoreSystemProperties(() -> {
             System.setProperty("os.name", "linux");
 
-            SilkExtension cachingSilkExtension = new SilkExtension(project.getObjects(), project) {
-                private boolean findRootsCalled = false;
-
-                @Override
-                protected List<Path> findSteamLibraryRoots(String os) {
-                    assertFalse(
-                            findRootsCalled,
-                            "findSteamLibraryRoots should only be effectively called once for a successful find due to caching of FileCollection");
-                    findRootsCalled = true;
-                    return Collections.singletonList(fakeSteamRoot);
-                }
-            };
-
-            FileCollection gameJarFc1 = cachingSilkExtension.findEquilinoxGameJar();
+            FileCollection gameJarFc1 = spiedExtension.findEquilinoxGameJar();
             assertNotNull(gameJarFc1);
             assertEquals("Equilinox.jar", gameJarFc1.getSingleFile().getName());
 
-            FileCollection gameJarFc2 = cachingSilkExtension.findEquilinoxGameJar();
+            FileCollection gameJarFc2 = spiedExtension.findEquilinoxGameJar();
             assertSame(
                     gameJarFc1,
                     gameJarFc2,
                     "Expected cached FileCollection instance to be returned if file still exists.");
+
+            verify(spiedExtension, times(1)).findSteamLibraryRoots(anyString());
         });
     }
 
@@ -367,33 +346,25 @@ class SilkExtensionTest {
         Path fakeSteamRoot = projectDir.resolve("CacheInvalidationSteamLib");
         Path gameDir = fakeSteamRoot.resolve("steamapps/common/Equilinox");
         Files.createDirectories(gameDir);
-        File gameJarFile = createTemporaryGameJar(
-                gameDir, "EquilinoxToDelete.jar", List.of("main/MainApp.class", "main/FirstScreenUi.class"));
+        File gameJarFile =
+                createTemporaryGameJar(gameDir, "EquilinoxToDelete.jar", SilkExtension.EQUILINOX_CLASS_FILES);
+
+        SilkExtension spiedExtension = spy(this.silkExtension);
+        doReturn(Collections.singletonList(fakeSteamRoot)).when(spiedExtension).findSteamLibraryRoots(anyString());
 
         SystemLambda.restoreSystemProperties(() -> {
             System.setProperty("os.name", "linux");
 
-            AtomicInteger findRootsCallCount = new AtomicInteger(0);
-            SilkExtension localSilkExtension = new SilkExtension(project.getObjects(), project) {
-                @Override
-                protected List<Path> findSteamLibraryRoots(String os) {
-                    findRootsCallCount.getAndIncrement();
-                    return Collections.singletonList(fakeSteamRoot);
-                }
-            };
-
-            FileCollection gameJarFc1 = localSilkExtension.findEquilinoxGameJar();
+            FileCollection gameJarFc1 = spiedExtension.findEquilinoxGameJar();
             assertNotNull(gameJarFc1);
             assertEquals("EquilinoxToDelete.jar", gameJarFc1.getSingleFile().getName());
-            assertEquals(1, findRootsCallCount.get(), "findSteamLibraryRoots should be called once for initial find.");
 
             assertTrue(gameJarFile.delete(), "Failed to delete the game JAR for cache test.");
 
-            Exception exception = assertThrows(GradleException.class, localSilkExtension::findEquilinoxGameJar);
+            Exception exception = assertThrows(GradleException.class, spiedExtension::findEquilinoxGameJar);
             assertTrue(exception.getMessage().contains("Could not automatically find Equilinox game JAR"));
-            assertTrue(
-                    findRootsCallCount.get() > 1,
-                    "findSteamLibraryRoots should be called again after cached file deletion.");
+
+            verify(spiedExtension, times(2)).findSteamLibraryRoots(anyString());
         });
     }
 
@@ -404,32 +375,23 @@ class SilkExtensionTest {
         Path gameDir = fakeSteamRoot.resolve("steamapps/common/Equilinox");
         Files.createDirectories(gameDir);
 
-        AtomicInteger findRootsCallCount = new AtomicInteger(0);
-        SilkExtension localSilkExtension = new SilkExtension(project.getObjects(), project) {
-            @Override
-            protected List<Path> findSteamLibraryRoots(String os) {
-                findRootsCallCount.incrementAndGet();
-                return Collections.singletonList(fakeSteamRoot);
-            }
-        };
+        SilkExtension spiedExtension = spy(this.silkExtension);
+        doReturn(Collections.singletonList(fakeSteamRoot)).when(spiedExtension).findSteamLibraryRoots(anyString());
 
         SystemLambda.restoreSystemProperties(() -> {
             System.setProperty("os.name", "linux");
 
             assertThrows(
                     GradleException.class,
-                    localSilkExtension::findEquilinoxGameJar,
+                    spiedExtension::findEquilinoxGameJar,
                     "Should throw when game JAR is not found.");
-            assertEquals(
-                    1, findRootsCallCount.get(), "findSteamLibraryRoots should be called once for the first attempt.");
-            assertNull(localSilkExtension.cachedEquilinoxGameJarFc, "Cache should be null after a failed attempt.");
+            assertNull(spiedExtension.cachedEquilinoxGameJarFc, "Cache should be null after a failed attempt.");
 
             File gameJarFile = createTemporaryGameJar(gameDir, "Equilinox.jar", SilkExtension.EQUILINOX_CLASS_FILES);
-            assertTrue(gameJarFile.exists());
 
             FileCollection foundFc;
             try {
-                foundFc = localSilkExtension.findEquilinoxGameJar();
+                foundFc = spiedExtension.findEquilinoxGameJar();
             } finally {
                 if (gameJarFile.exists()) gameJarFile.delete();
             }
@@ -437,9 +399,8 @@ class SilkExtensionTest {
             assertNotNull(foundFc);
             assertFalse(foundFc.isEmpty());
             assertEquals("Equilinox.jar", foundFc.getSingleFile().getName());
-            assertTrue(
-                    findRootsCallCount.get() > 1,
-                    "findSteamLibraryRoots should be called again for the second attempt.");
+
+            verify(spiedExtension, times(2)).findSteamLibraryRoots(anyString());
         });
     }
 
@@ -634,7 +595,7 @@ class SilkExtensionTest {
                         "C:\\Users\\TestUser",
                         List.of("C:\\Program Files (x86)\\Steam", "D:\\MySteamLib"),
                         "C:\\Program Files (x86)\\Steam\\steamapps\\libraryfolders.vdf",
-                        "\"libraryfolders\"\n{\n  \"0\"\n  {\n    \"path\"		\"C:\\\\Program Files (x86)\\\\Steam\"\n  }\n  \"1\"\n  {\n    \"path\"		\"D:\\\\MySteamLib\"\n  }\n}",
+                        "\"libraryfolders\"\n{\n  \"0\"\n  {\n    \"path\"     \"C:\\\\Program Files (x86)\\\\Steam\"\n  }\n  \"1\"\n  {\n    \"path\"       \"D:\\\\MySteamLib\"\n  }\n}",
                         List.of("C:\\Program Files (x86)\\Steam", "D:\\MySteamLib")),
                 Arguments.of(
                         "linux",
@@ -670,14 +631,14 @@ class SilkExtensionTest {
                         "C:\\Users\\TestUser",
                         List.of("C:\\Program Files (x86)\\Steam"),
                         "C:\\Program Files (x86)\\Steam\\steamapps\\libraryfolders.vdf",
-                        "\"libraryfolders\"\n{\n  \"0\"\n  {\n    \"path\"		\"E:\\\\NonExistentSteamLib\"\n  }\n \"1\"\n {\n \"path\" \"C:\\\\Program Files (x86)\\\\Steam\"\n }\n}",
+                        "\"libraryfolders\"\n{\n  \"0\"\n  {\n    \"path\"     \"E:\\\\NonExistentSteamLib\"\n  }\n \"1\"\n {\n \"path\" \"C:\\\\Program Files (x86)\\\\Steam\"\n }\n}",
                         List.of("C:\\Program Files (x86)\\Steam")),
                 Arguments.of(
                         "windows",
                         "C:\\Users\\TestUser",
                         List.of("C:\\Program Files (x86)\\Steam"),
                         "C:\\Program Files (x86)\\Steam\\steamapps\\libraryfolders.vdf",
-                        "\"libraryfolders\"\n{\n  \"not_a_path\"		\"C:\\\\SomeOtherDir\"\n}",
+                        "\"libraryfolders\"\n{\n  \"not_a_path\"       \"C:\\\\SomeOtherDir\"\n}",
                         List.of("C:\\Program Files (x86)\\Steam")),
                 Arguments.of(
                         "linux",
@@ -690,7 +651,7 @@ class SilkExtensionTest {
                         "linux",
                         "/home/testuser",
                         List.of("/home/testuser/.local/share/Steam"),
-                        null, // No VDF
+                        null,
                         null,
                         List.of("/home/testuser/.local/share/Steam")),
                 Arguments.of(
