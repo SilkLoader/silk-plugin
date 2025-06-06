@@ -22,6 +22,7 @@
 package de.rhm176.silk;
 
 import de.rhm176.silk.extension.FabricExtension;
+import de.rhm176.silk.extension.RunConfigExtension;
 import de.rhm176.silk.extension.VineflowerExtension;
 import java.io.File;
 import java.io.IOException;
@@ -37,9 +38,9 @@ import java.util.stream.Stream;
 import javax.inject.Inject;
 import org.gradle.api.Action;
 import org.gradle.api.GradleException;
+import org.gradle.api.NamedDomainObjectContainer;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
-import org.gradle.api.file.DirectoryProperty;
 import org.gradle.api.file.FileCollection;
 import org.gradle.api.file.RegularFile;
 import org.gradle.api.model.ObjectFactory;
@@ -52,13 +53,7 @@ import org.jetbrains.annotations.VisibleForTesting;
  * Configuration extension for the Silk Gradle plugin.
  * <p>
  * This extension is used to configure settings related to the Equilinox modding
- * environment, such as the game JAR, run directory, and mod loader main class.
- * It is accessed in a Gradle build script via the {@code silk} block:
- * <pre>
- * silk {
- *     runDir.set(layout.projectDirectory.dir("run"))
- * }
- * </pre>
+ * environment, such as the game JAR, runs, and mod loader main class.
  */
 public abstract class SilkExtension {
     /**
@@ -111,13 +106,12 @@ public abstract class SilkExtension {
     }
 
     // If the game can't be found by name, it will search all jars in the
-    // Equilinox install dir and if all of the listed classes are found,
+    // Equilinox install dir and if all the listed classes are found,
     // the jar is determined to be the game.
     @VisibleForTesting
     static final List<String> EQUILINOX_CLASS_FILES = List.of("main/MainApp.class", "main/FirstScreenUi.class");
 
     private Provider<RegularFile> internalGameJarProvider;
-    private final DirectoryProperty runDir;
     private final Project project;
     private final VineflowerExtension vineflower;
     private final FabricExtension fabric;
@@ -137,9 +131,6 @@ public abstract class SilkExtension {
      */
     @Inject
     public SilkExtension(ObjectFactory objectFactory, Project project) {
-        // default set in SilkPlugin
-        this.runDir = objectFactory.directoryProperty();
-
         this.project = project;
 
         this.vineflower = objectFactory.newInstance(VineflowerExtension.class);
@@ -152,6 +143,12 @@ public abstract class SilkExtension {
         this.silkLoaderMainClassOverride = objectFactory.property(String.class);
 
         this.modsContainer = objectFactory.newInstance(ModRegistration.class, project, registeredSubprojects);
+    }
+
+    public abstract NamedDomainObjectContainer<RunConfigExtension> getRuns();
+
+    public void runs(Action<? super NamedDomainObjectContainer<RunConfigExtension>> action) {
+        action.execute(getRuns());
     }
 
     /**
@@ -371,24 +368,6 @@ public abstract class SilkExtension {
                     + "This is likely an internal plugin error.");
         }
         return internalGameJarProvider;
-    }
-
-    /**
-     * The directory where the game will be launched.
-     * <p>
-     * Users can configure this to specify a custom run directory for development or testing.
-     * Example in {@code build.gradle.kts}:
-     * <pre>
-     * silk {
-     *     runDir.set(layout.projectDirectory.dir("my_custom_run_dir"))
-     * }
-     * </pre>
-     * A default value is typically set by the {@link SilkPlugin}.
-     *
-     * @return A {@link DirectoryProperty} representing the run directory.
-     */
-    public DirectoryProperty getRunDir() {
-        return runDir;
     }
 
     /**

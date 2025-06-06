@@ -36,12 +36,12 @@ public class SilkPluginSilkLoaderConfigTest extends BaseSilkPluginTest {
 
         appendBuildGradle(
                 "afterEvaluate {",
-                "  tasks.named('" + SilkPlugin.RUN_GAME_TASK_NAME + "', JavaExec) {",
+                "  tasks.named('" + SilkPlugin.DEFAULT_RUN_GAME_TASK_NAME + "', JavaExec) {",
                 "    println \"runGameMainClass: ${it.mainClass.getOrNull()}\"",
                 "  }",
                 "}");
         BuildResult result =
-                createRunner(SilkPlugin.RUN_GAME_TASK_NAME, "--dry-run").build();
+                createRunner(SilkPlugin.DEFAULT_RUN_GAME_TASK_NAME, "--dry-run").build();
         assertTrue(result.getOutput().contains("runGameMainClass: com.example.OverriddenMain"));
     }
 
@@ -52,12 +52,12 @@ public class SilkPluginSilkLoaderConfigTest extends BaseSilkPluginTest {
 
         appendBuildGradle(
                 "afterEvaluate {",
-                "  tasks.named('" + SilkPlugin.RUN_GAME_TASK_NAME + "', JavaExec) {",
+                "  tasks.named('" + SilkPlugin.DEFAULT_RUN_GAME_TASK_NAME + "', JavaExec) {",
                 "    println \"runGameMainClass: ${it.mainClass.getOrNull()}\"",
                 "  }",
                 "}");
         BuildResult result =
-                createRunner(SilkPlugin.RUN_GAME_TASK_NAME, "--dry-run").build();
+                createRunner(SilkPlugin.DEFAULT_RUN_GAME_TASK_NAME, "--dry-run").build();
         assertTrue(result.getOutput().contains("runGameMainClass: com.example.ActualMainInManifest"));
     }
 }

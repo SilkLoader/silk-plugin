@@ -43,7 +43,7 @@ public class SilkPluginApplyTest extends BaseSilkPluginTest {
         assertTrue(result.getOutput().contains(SilkPlugin.TRANSFORM_CLASSES_TASK_NAME));
         assertTrue(result.getOutput().contains(SilkPlugin.EXTRACT_NATIVES_TASK_NAME));
         assertTrue(result.getOutput().contains(SilkPlugin.GENERATE_SOURCES_TASK_NAME));
-        assertTrue(result.getOutput().contains(SilkPlugin.RUN_GAME_TASK_NAME));
+        assertTrue(result.getOutput().contains(SilkPlugin.DEFAULT_RUN_GAME_TASK_NAME));
     }
 
     @Test
