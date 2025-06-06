@@ -480,7 +480,9 @@ public class SilkPlugin implements Plugin<Project> {
                                 "fabric.gameJarPath", gameJarProvider.get().getAbsolutePath());
                         properties.put(
                                 "java.library.path",
-                                nativesDir.get().getAsFile().getAbsolutePath() + File.pathSeparator + gameJarProvider.get().getParentFile().getAbsolutePath());
+                                nativesDir.get().getAsFile().getAbsolutePath()
+                                        + File.pathSeparator
+                                        + gameJarProvider.get().getParentFile().getAbsolutePath());
 
                         List<String> finalJvmArgs = new ArrayList<>(otherArgs);
 
