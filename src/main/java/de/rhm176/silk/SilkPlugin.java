@@ -55,6 +55,8 @@ public class SilkPlugin implements Plugin<Project> {
 
     }
 
+    public static final String SILK_TASK_COMMON_GROUP = "Silk";
+
     public static final String MODIFY_FABRIC_MOD_JSON_TASK_NAME = "modifyFabricModJson";
     public static final String TRANSFORM_CLASSES_TASK_NAME = "transformGameClasses";
     public static final String EXTRACT_NATIVES_TASK_NAME = "extractNatives";
@@ -204,8 +206,8 @@ public class SilkPlugin implements Plugin<Project> {
 
         TaskProvider<GenerateFabricJsonTask> generateFabricModJson = project.getTasks()
                 .register(GENERATE_FABRIC_MOD_JSON_TASK_NAME, GenerateFabricJsonTask.class, task -> {
-                    task.setDescription("Generates the fabric.mod.json file from silk.fabricManifest configuration.");
-                    task.setGroup(null);
+                    task.setDescription("Generates the fabric.mod.json file from silk.fabric configuration.");
+                    task.setGroup(SILK_TASK_COMMON_GROUP);
 
                     task.onlyIf(spec -> extension.getGenerateFabricModJson().getOrElse(false));
 
@@ -251,7 +253,7 @@ public class SilkPlugin implements Plugin<Project> {
 
         TaskProvider<ModifyFabricModJsonTask> modifyFabricModJsonTask = project.getTasks()
                 .register(MODIFY_FABRIC_MOD_JSON_TASK_NAME, ModifyFabricModJsonTask.class, task -> {
-                    task.setGroup(null);
+                    task.setGroup(SILK_TASK_COMMON_GROUP);
                     task.setDescription("Adds bundled submod JAR references to fabric.mod.json.");
 
                     Provider<RegularFile> fabricModJsonFileLocation = project.getLayout()
@@ -288,7 +290,7 @@ public class SilkPlugin implements Plugin<Project> {
 
         TaskProvider<TransformClassesTask> transformGameClassesTaskProvider = project.getTasks()
                 .register(TRANSFORM_CLASSES_TASK_NAME, TransformClassesTask.class, task -> {
-                    task.setGroup(null);
+                    task.setGroup(SILK_TASK_COMMON_GROUP);
 
                     if (isRootSilkProject(project)) {
                         for (Project subProject : extension.getRegisteredSubprojectsInternal()) {
@@ -374,7 +376,7 @@ public class SilkPlugin implements Plugin<Project> {
 
         if (isRootSilkProject(project)) {
             project.getTasks().register(GENERATE_SOURCES_TASK_NAME, GenerateSourcesTask.class, task -> {
-                task.setGroup("Silk");
+                task.setGroup(SILK_TASK_COMMON_GROUP);
                 task.setDescription("Decompiles the game JAR using Vineflower to produce a sources JAR.");
 
                 task.getInputJar()
@@ -391,13 +393,13 @@ public class SilkPlugin implements Plugin<Project> {
             Provider<Directory> nativesDir = project.getLayout().getBuildDirectory().dir("silk/natives");
             TaskProvider<ExtractNativesTask> extractNativesTaskProvider = project.getTasks()
                     .register(EXTRACT_NATIVES_TASK_NAME, ExtractNativesTask.class, task -> {
-                        task.setGroup("Silk");
+                        task.setGroup(SILK_TASK_COMMON_GROUP);
                         task.setDescription("Extracts native libraries from the game JAR.");
                         task.getInputJar().set(extension.getGameJar());
                         task.getNativesDir().set(nativesDir);
                     });
             project.getTasks().register(RUN_GAME_TASK_NAME, JavaExec.class, task -> {
-                task.setGroup("Silk");
+                task.setGroup(SILK_TASK_COMMON_GROUP);
                 task.setDescription("Runs the game.");
 
                 task.dependsOn(transformGameClassesTaskProvider);
