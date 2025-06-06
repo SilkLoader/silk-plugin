@@ -455,7 +455,8 @@ public class SilkPlugin implements Plugin<Project> {
 
                     task.args(runConfig.getProgramArgs());
                     task.getJvmArgumentProviders().add(() -> {
-                        Map<String, String> finalProperties = new LinkedHashMap<>();
+                        Map<String, String> properties = new LinkedHashMap<>();
+                        List<String> otherArgs = new ArrayList<>();
 
                         runConfig
                                 .getJvmArgs()
@@ -466,24 +467,27 @@ public class SilkPlugin implements Plugin<Project> {
                                         if (parts.length > 0 && !parts[0].isEmpty()) {
                                             String key = parts[0];
                                             String value = parts.length > 1 ? parts[1] : "";
-                                            finalProperties.put(key, value);
+                                            properties.put(key, value);
                                         }
+                                    } else {
+                                        otherArgs.add(arg);
                                     }
                                 });
 
-                        finalProperties.put("fabric.development", "true");
-                        finalProperties.put("deqmodloader.loadedNatives", "true");
-                        finalProperties.put(
+                        properties.put("fabric.development", "true");
+                        properties.put("eqmodloader.loadedNatives", "true");
+                        properties.put(
                                 "fabric.gameJarPath", gameJarProvider.get().getAbsolutePath());
-                        finalProperties.put(
+                        properties.put(
                                 "java.library.path",
-                                nativesDir.get().getAsFile().getAbsolutePath());
+                                nativesDir.get().getAsFile().getAbsolutePath() + File.pathSeparator + gameJarProvider.get().getParentFile().getAbsolutePath());
 
-                        List<String> allJvmArgs = new ArrayList<>();
-                        finalProperties.forEach(
-                                (key, value) -> allJvmArgs.add("-D" + key + (value.isEmpty() ? "" : "=" + value)));
+                        List<String> finalJvmArgs = new ArrayList<>(otherArgs);
 
-                        return allJvmArgs;
+                        properties.forEach(
+                                (key, value) -> finalJvmArgs.add("-D" + key + (value.isEmpty() ? "" : "=" + value)));
+
+                        return finalJvmArgs;
                     });
                     task.environment(runConfig.getEnvironmentVariables().get());
 
