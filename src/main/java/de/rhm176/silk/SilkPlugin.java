@@ -70,7 +70,7 @@ public class SilkPlugin implements Plugin<Project> {
      */
     @Override
     public void apply(@NotNull Project project) {
-        project.getPluginManager().apply("java");
+        project.getPluginManager().apply("java-library");
 
         conditionallyAddRepositories(project);
 

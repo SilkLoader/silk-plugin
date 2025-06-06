@@ -98,6 +98,12 @@ public abstract class SilkExtension {
                         .warn("Silk: Attempted to register a null subproject in 'silk.mods.register()'.");
                 return;
             }
+            if (!subProject.getPluginManager().hasPlugin("")) {
+                rootProject
+                        .getLogger()
+                        .warn("Silk: Attempted to register a subproject which does not have the silk-plugin applied in 'silk.mods.register()'.");
+                return;
+            }
             if (!targetList.contains(subProject)) {
                 targetList.add(subProject);
             } else {
@@ -455,7 +461,7 @@ public abstract class SilkExtension {
                 try (Stream<Path> stream = Files.list(equilinoxGameDir)) {
                     List<Path> jarFilesInDir = stream.filter(p -> Files.isRegularFile(p)
                                     && p.getFileName().toString().toLowerCase().endsWith(".jar"))
-                            .collect(Collectors.toList());
+                            .toList();
 
                     for (Path potentialJar : jarFilesInDir) {
                         if (isCorrectGameJarByContent(potentialJar)) {
