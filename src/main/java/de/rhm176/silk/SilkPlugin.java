@@ -446,7 +446,10 @@ public class SilkPlugin implements Plugin<Project> {
 
                     task.workingDir(runConfig.getRunDir());
 
-                    task.classpath(gameJarProvider, modJarFileProvider, project.getConfigurations().getByName(sourceSet.getRuntimeClasspathConfigurationName()));
+                    task.classpath(
+                            gameJarProvider,
+                            modJarFileProvider,
+                            project.getConfigurations().getByName(sourceSet.getRuntimeClasspathConfigurationName()));
 
                     task.getMainClass().set(effectiveLoaderMainClass);
 
@@ -454,24 +457,31 @@ public class SilkPlugin implements Plugin<Project> {
                     task.getJvmArgumentProviders().add(() -> {
                         Map<String, String> finalProperties = new LinkedHashMap<>();
 
-                        runConfig.getJvmArgs().getOrElse(Collections.emptyList()).forEach(arg -> {
-                            if (arg.startsWith("-D")) {
-                                String[] parts = arg.substring(2).split("=", 2);
-                                if (parts.length > 0 && !parts[0].isEmpty()) {
-                                    String key = parts[0];
-                                    String value = parts.length > 1 ? parts[1] : "";
-                                    finalProperties.put(key, value);
-                                }
-                            }
-                        });
+                        runConfig
+                                .getJvmArgs()
+                                .getOrElse(Collections.emptyList())
+                                .forEach(arg -> {
+                                    if (arg.startsWith("-D")) {
+                                        String[] parts = arg.substring(2).split("=", 2);
+                                        if (parts.length > 0 && !parts[0].isEmpty()) {
+                                            String key = parts[0];
+                                            String value = parts.length > 1 ? parts[1] : "";
+                                            finalProperties.put(key, value);
+                                        }
+                                    }
+                                });
 
                         finalProperties.put("fabric.development", "true");
                         finalProperties.put("deqmodloader.loadedNatives", "true");
-                        finalProperties.put("fabric.gameJarPath", gameJarProvider.get().getAbsolutePath());
-                        finalProperties.put("java.library.path", nativesDir.get().getAsFile().getAbsolutePath());
+                        finalProperties.put(
+                                "fabric.gameJarPath", gameJarProvider.get().getAbsolutePath());
+                        finalProperties.put(
+                                "java.library.path",
+                                nativesDir.get().getAsFile().getAbsolutePath());
 
                         List<String> allJvmArgs = new ArrayList<>();
-                        finalProperties.forEach((key, value) -> allJvmArgs.add("-D" + key + (value.isEmpty() ? "" : "=" + value)));
+                        finalProperties.forEach(
+                                (key, value) -> allJvmArgs.add("-D" + key + (value.isEmpty() ? "" : "=" + value)));
 
                         return allJvmArgs;
                     });
