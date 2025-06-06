@@ -133,7 +133,7 @@ jobs:
           draft: false
           makeLatest: true
           tag: ${{ steps.read_version.outputs.version_tag }}
-          name: Release ${{ steps.read_version.outputs.release_version }}
+          name: ${{ steps.read_version.outputs.release_version }}
           prerelease: ${{ github.event.inputs.is_prerelease }}
           commit: ${{ github.event.inputs.target_commitish || github.ref }}
           artifacts: "./build/libs/silk-plugin-${{ steps.read_version.outputs.release_version }}.jar"
