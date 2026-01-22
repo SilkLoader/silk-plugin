@@ -107,10 +107,13 @@ publishing {
 
     publications {
         withType<MavenPublication> {
-            artifacts.removeIf { it is MavenArtifact && it.classifier == null && it.extension == "jar" }
             artifact(tasks.named("shadowJar"))
         }
     }
+}
+
+tasks.jar {
+    enabled = false
 }
 
 spotless {
