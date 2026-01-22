@@ -23,7 +23,6 @@ package de.rhm176.silk.task;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import de.rhm176.silk.accesswidener.*;
 import java.io.*;
 import java.nio.file.Files;
 import java.util.*;
@@ -32,10 +31,13 @@ import java.util.jar.JarFile;
 import java.util.jar.JarInputStream;
 import java.util.jar.JarOutputStream;
 import java.util.zip.ZipEntry;
+
+import net.fabricmc.classtweaker.api.ClassTweakerReader;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.GradleException;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.RegularFileProperty;
+import net.fabricmc.classtweaker.api.ClassTweaker;
 import org.gradle.api.tasks.*;
 import org.objectweb.asm.*;
 
@@ -48,51 +50,8 @@ import org.objectweb.asm.*;
  * classes modified to implement the additional interfaces.
  */
 public abstract class TransformClassesTask extends DefaultTask {
-    static final class ProcessedAccessWidener {
-        AccessModifier classModifier;
-        Map<String, AccessModifier> fieldModifiers = new HashMap<>();
-        Map<String, AccessModifier> methodModifiers = new HashMap<>();
-
-        boolean isEmpty() {
-            return classModifier == null && fieldModifiers.isEmpty() && methodModifiers.isEmpty();
-        }
-
-        void updateClassModifierWithRule(AccessModifier newRuleModifier) {
-            if (newRuleModifier == AccessModifier.EXTENDABLE) {
-                this.classModifier = AccessModifier.EXTENDABLE;
-            } else if (newRuleModifier == AccessModifier.ACCESSIBLE) {
-                if (this.classModifier != AccessModifier.EXTENDABLE) {
-                    this.classModifier = AccessModifier.ACCESSIBLE;
-                }
-            }
-        }
-
-        void addFieldRule(String name, String desc, AccessModifier modifier) {
-            String key = name + ":" + desc;
-            AccessModifier current = fieldModifiers.get(key);
-            if (modifier == AccessModifier.MUTABLE) {
-                fieldModifiers.put(key, AccessModifier.MUTABLE);
-            } else if (modifier == AccessModifier.ACCESSIBLE) {
-                if (current != AccessModifier.MUTABLE) {
-                    fieldModifiers.put(key, AccessModifier.ACCESSIBLE);
-                }
-            }
-        }
-
-        void addMethodRule(String name, String desc, AccessModifier modifier) {
-            String key = name + desc;
-            AccessModifier current = methodModifiers.get(key);
-            if (modifier == AccessModifier.EXTENDABLE) {
-                methodModifiers.put(key, AccessModifier.EXTENDABLE);
-            } else if (modifier == AccessModifier.ACCESSIBLE) {
-                if (current != AccessModifier.EXTENDABLE) {
-                    methodModifiers.put(key, AccessModifier.ACCESSIBLE);
-                }
-            }
-        }
-    }
-
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private ClassTweaker classTweaker;
 
     /**
      * The input JAR file whose classes are to be transformed.
@@ -122,46 +81,6 @@ public abstract class TransformClassesTask extends DefaultTask {
     @OutputFile
     public abstract RegularFileProperty getOutputTransformedJar();
 
-    private Map<String, ProcessedAccessWidener> processRawAwRules(List<AccessWidenerRule> rawRules) {
-        Map<String, ProcessedAccessWidener> organizedRules = new HashMap<>();
-        if (rawRules == null) return organizedRules;
-
-        for (AccessWidenerRule rule : rawRules) {
-            String classNameInternal = rule.getClassName();
-            AccessModifier modifier = rule.getModifier();
-
-            if (rule instanceof ClassAccessWidener) {
-                ProcessedAccessWidener classRules =
-                        organizedRules.computeIfAbsent(classNameInternal, k -> new ProcessedAccessWidener());
-                classRules.updateClassModifierWithRule(modifier);
-            } else if (rule instanceof MethodAccessWidener methodWidener) {
-                ProcessedAccessWidener classRules =
-                        organizedRules.computeIfAbsent(classNameInternal, k -> new ProcessedAccessWidener());
-                classRules.addMethodRule(methodWidener.getMethodName(), methodWidener.getMethodDescriptor(), modifier);
-            } else if (rule instanceof FieldAccessWidener fieldWidener) {
-                ProcessedAccessWidener classRules =
-                        organizedRules.computeIfAbsent(classNameInternal, k -> new ProcessedAccessWidener());
-                classRules.addFieldRule(fieldWidener.getFieldName(), fieldWidener.getFieldDescriptor(), modifier);
-            }
-        }
-
-        for (ProcessedAccessWidener classRules : organizedRules.values()) {
-            for (AccessModifier fieldMod : classRules.fieldModifiers.values()) {
-                if (fieldMod == AccessModifier.ACCESSIBLE || fieldMod == AccessModifier.MUTABLE) {
-                    classRules.updateClassModifierWithRule(AccessModifier.ACCESSIBLE);
-                }
-            }
-            for (AccessModifier methodMod : classRules.methodModifiers.values()) {
-                if (methodMod == AccessModifier.ACCESSIBLE) {
-                    classRules.updateClassModifierWithRule(AccessModifier.ACCESSIBLE);
-                } else if (methodMod == AccessModifier.EXTENDABLE) {
-                    classRules.updateClassModifierWithRule(AccessModifier.EXTENDABLE);
-                }
-            }
-        }
-        return organizedRules;
-    }
-
     /**
      * Executes the transformation process.
      * It reads the input JAR, parses interface injection configurations from the
@@ -176,6 +95,8 @@ public abstract class TransformClassesTask extends DefaultTask {
     public void transform() {
         File inputJarFile = getInputJar().get().getAsFile();
         File outputJarFile = getOutputTransformedJar().get().getAsFile();
+        classTweaker = ClassTweaker.newInstance();
+        classTweaker.visitHeader("official");
 
         if (!inputJarFile.exists()) {
             throw new GradleException("Input JAR does not exist: " + inputJarFile.getAbsolutePath());
@@ -187,10 +108,6 @@ public abstract class TransformClassesTask extends DefaultTask {
                 throw new GradleException("Could not create output directory: " + outputDir.getAbsolutePath());
             }
         }
-
-        Map<String, List<String>> interfaceMappings = new HashMap<>();
-        List<AccessWidenerRule> allRawAwRulesList = new ArrayList<>();
-
         for (File sourceFileOrJar : getModConfigurationSources().getFiles().stream()
                 .sorted(Comparator.comparing(File::getAbsolutePath))
                 .toList()) {
@@ -198,8 +115,7 @@ public abstract class TransformClassesTask extends DefaultTask {
 
             if (sourceFileOrJar.isFile() && sourceFileOrJar.getName().equals("fabric.mod.json")) {
                 try (InputStream is = new FileInputStream(sourceFileOrJar)) {
-                    processFabricModJsonStream(
-                            is, sourceFileOrJar.getAbsolutePath(), interfaceMappings, allRawAwRulesList, null);
+                    processFabricModJsonStream(is, sourceFileOrJar.getAbsolutePath(), null);
                 } catch (IOException e) {
                     throw new GradleException(
                             "Silk: Failed to read direct fabric.mod.json: " + sourceFileOrJar.getAbsolutePath(), e);
@@ -210,12 +126,7 @@ public abstract class TransformClassesTask extends DefaultTask {
                     JarEntry fmjEntry = jar.getJarEntry("fabric.mod.json");
                     if (fmjEntry != null) {
                         try (InputStream is = jar.getInputStream(fmjEntry)) {
-                            processFabricModJsonStream(
-                                    is,
-                                    sourceFileOrJar.getName() + "!fabric.mod.json",
-                                    interfaceMappings,
-                                    allRawAwRulesList,
-                                    jar);
+                            processFabricModJsonStream(is, sourceFileOrJar.getName() + "!fabric.mod.json", jar);
                         }
                     }
                 } catch (IOException e) {
@@ -224,8 +135,6 @@ public abstract class TransformClassesTask extends DefaultTask {
             }
         }
 
-        Map<String, ProcessedAccessWidener> aggregatedProcessedAwRules =
-                allRawAwRulesList.isEmpty() ? Collections.emptyMap() : processRawAwRules(allRawAwRulesList);
         try (JarInputStream jis = new JarInputStream(new BufferedInputStream(new FileInputStream(inputJarFile)));
                 JarOutputStream jos =
                         new JarOutputStream(new BufferedOutputStream(new FileOutputStream(outputJarFile)))) {
@@ -245,27 +154,16 @@ public abstract class TransformClassesTask extends DefaultTask {
                 }
 
                 byte[] entryBytes = readEntryData(jis);
-
                 if (originalEntry.getName().endsWith(".class")) {
                     String classNameInternal = originalEntry
                             .getName()
                             .substring(0, originalEntry.getName().length() - ".class".length());
-                    List<String> interfacesToAdd = interfaceMappings.get(classNameInternal);
-                    ProcessedAccessWidener awRules =
-                            aggregatedProcessedAwRules.getOrDefault(classNameInternal, new ProcessedAccessWidener());
 
-                    if ((interfacesToAdd != null && !interfacesToAdd.isEmpty()) || !awRules.isEmpty()) {
-                        getLogger()
-                                .debug(
-                                        "Silk: Transforming class {}: adding interfaces {} and applying AW rules.",
-                                        classNameInternal,
-                                        Objects.toString(interfacesToAdd, "none"));
-                        try {
-                            entryBytes = transformClassBytecode(entryBytes, interfacesToAdd, awRules);
-                        } catch (Exception e) {
-                            throw new GradleException("Failed to transform class: " + classNameInternal, e);
-                        }
-                    }
+                    getLogger()
+                            .debug(
+                                    "Silk: Transforming class {}: applying CT rules.",
+                                    classNameInternal);
+                    entryBytes = transformClassBytecode(entryBytes);
                 }
                 jos.write(entryBytes);
                 jos.closeEntry();
@@ -275,103 +173,71 @@ public abstract class TransformClassesTask extends DefaultTask {
         }
     }
 
-    private void mergeMappings(Map<String, List<String>> targetMap, Map<String, List<String>> newMappings) {
-        newMappings.forEach((className, interfaces) -> {
-            List<String> existingList = targetMap.computeIfAbsent(className, k -> new ArrayList<>());
-            existingList.addAll(interfaces);
-            Collections.sort(existingList);
-            targetMap.put(className, existingList);
-        });
-    }
-
     /**
      * Processes a single fabric.mod.json stream to extract interface mappings and AW file info.
      *
      * @param fmjStream InputStream of the fabric.mod.json content.
      * @param fmjSourceDescription Description of where this fmjStream comes from (for logging).
-     * @param outInterfaceMappings Map to add parsed interface mappings to.
-     * @param outRawAwRulesList List to add parsed AccessWidenerRules to.
      * @param containingJar Optional JarFile if the fmjStream comes from within a JAR, used to resolve AW paths.
      */
     private void processFabricModJsonStream(
             InputStream fmjStream,
             String fmjSourceDescription,
-            Map<String, List<String>> outInterfaceMappings,
-            List<AccessWidenerRule> outRawAwRulesList,
             JarFile containingJar)
             throws IOException {
-        JsonNode rootNode = OBJECT_MAPPER.readTree(fmjStream);
-
-        JsonNode customNode = rootNode.path("custom");
-        if (customNode.isObject()) {
-            JsonNode injectionsNode = customNode.path("silk:injected_interfaces");
-            if (injectionsNode.isObject()) {
-                Map<String, List<String>> currentFileMappings = new HashMap<>();
-                Set<Map.Entry<String, JsonNode>> fields = injectionsNode.properties();
-                for (Map.Entry<String, JsonNode> field : fields) {
-                    String className = field.getKey().replace('.', '/');
-                    JsonNode interfacesArray = field.getValue();
-                    if (interfacesArray.isArray()) {
-                        List<String> normalizedInterfaceNames = new ArrayList<>();
-                        for (JsonNode interfaceNode : interfacesArray) {
-                            if (interfaceNode.isTextual()) {
-                                normalizedInterfaceNames.add(
-                                        interfaceNode.asText().replace('.', '/'));
-                            }
-                        }
-                        Collections.sort(normalizedInterfaceNames);
-                        if (!className.isEmpty() && !normalizedInterfaceNames.isEmpty()) {
-                            currentFileMappings
-                                    .computeIfAbsent(className, k -> new ArrayList<>())
-                                    .addAll(normalizedInterfaceNames);
-                        }
-                    }
-                }
-
-                currentFileMappings.forEach((cn, il) ->
-                        currentFileMappings.put(cn, il.stream().sorted().toList()));
-                mergeMappings(outInterfaceMappings, currentFileMappings);
-            }
-        }
-
-        JsonNode awPathNode = rootNode.path("accessWidener");
+        JsonNode awPathNode = OBJECT_MAPPER.readTree(fmjStream).path("accessWidener");
         if (awPathNode.isTextual()) {
             String awPath = awPathNode.asText();
+            String ref = "";
             if (awPath != null && !awPath.trim().isEmpty()) {
                 try {
-                    AccessWidener widener = null;
+                    byte[] data = null;
                     if (containingJar != null) {
+                        ref = containingJar.getName();
+
                         JarEntry awEntry = containingJar.getJarEntry(awPath);
                         if (awEntry != null) {
                             try (InputStream awStream = containingJar.getInputStream(awEntry)) {
-                                widener = new AccessWidener(awStream, containingJar.getName() + "!" + awPath);
+                                data = awStream.readAllBytes();
                             }
                         } else {
                             getLogger()
                                     .warn(
                                             "Silk: AccessWidener file '{}' not found inside JAR '{}' (referenced by {}).",
                                             awPath,
-                                            containingJar.getName(),
+                                            ref,
                                             fmjSourceDescription);
                         }
                     } else {
                         File fmjFile = new File(fmjSourceDescription);
                         File awFile = new File(fmjFile.getParentFile(), awPath);
+                        ref = awFile.getAbsolutePath();
+
                         if (awFile.exists() && awFile.isFile()) {
-                            widener =
-                                    new AccessWidener(Files.newInputStream(awFile.toPath()), awFile.getAbsolutePath());
+                            data = Files.readAllBytes(awFile.toPath());
                         } else {
                             getLogger()
                                     .warn(
                                             "AccessWidener file '{}' (resolved to '{}') not found on filesystem (referenced by {}).",
                                             awPath,
-                                            awFile.getAbsolutePath(),
+                                            ref,
                                             fmjSourceDescription);
                         }
                     }
 
-                    if (widener != null) {
-                        outRawAwRulesList.addAll(widener.getRules());
+                    if (data != null) {
+                        final ClassTweakerReader.Header header = ClassTweakerReader.readHeader(data);
+                        if (!header.getNamespace().equals("official")) {
+                            getLogger()
+                                    .error(
+                                            "Silk: Expected official namespace in AccessWidener file '{}' inside JAR '{}' (referenced by {}).",
+                                            awPath,
+                                            ref,
+                                            fmjSourceDescription);
+                        }
+
+                        var reader = ClassTweakerReader.create(classTweaker);
+                        reader.read(data, "official");
                     }
                 } catch (IOException | GradleException e) {
                     throw new GradleException(
@@ -394,116 +260,11 @@ public abstract class TransformClassesTask extends DefaultTask {
         return baos.toByteArray();
     }
 
-    private byte[] transformClassBytecode(
-            byte[] originalClassBytes,
-            List<String> interfacesToAddInternalNames,
-            ProcessedAccessWidener awRulesForThisClass) {
+    private byte[] transformClassBytecode(byte[] originalClassBytes) {
         ClassReader classReader = new ClassReader(originalClassBytes);
         ClassWriter classWriter = new ClassWriter(classReader, ClassWriter.COMPUTE_FRAMES);
 
-        ClassVisitor transformingVisitor = new ClassVisitor(Opcodes.ASM9, classWriter) {
-            @Override
-            public void visit(
-                    int version,
-                    int access,
-                    String name,
-                    String signature,
-                    String superName,
-                    String[] existingInterfaces) {
-                int newAccess = access;
-                if (awRulesForThisClass != null && awRulesForThisClass.classModifier != null) {
-                    newAccess = applyClassAccessModifier(access, awRulesForThisClass.classModifier);
-                }
-
-                Set<String> combinedInterfacesSet = new HashSet<>();
-                if (existingInterfaces != null) {
-                    combinedInterfacesSet.addAll(Arrays.asList(existingInterfaces));
-                }
-                if (interfacesToAddInternalNames != null) {
-                    for (String internalName : interfacesToAddInternalNames) {
-                        if (internalName != null && !internalName.trim().isEmpty()) {
-                            combinedInterfacesSet.add(internalName);
-                        }
-                    }
-                }
-
-                super.visit(
-                        version,
-                        newAccess,
-                        name,
-                        signature,
-                        superName,
-                        combinedInterfacesSet.stream().sorted().toArray(String[]::new));
-            }
-
-            @Override
-            public FieldVisitor visitField(
-                    int access, String fieldName, String fieldDescriptor, String signature, Object value) {
-                int newAccess = access;
-                if (awRulesForThisClass != null) {
-                    AccessModifier fieldAwModifier =
-                            awRulesForThisClass.fieldModifiers.get(fieldName + ":" + fieldDescriptor);
-                    if (fieldAwModifier != null) {
-                        newAccess = applyFieldAccessModifier(access, fieldAwModifier);
-                    }
-                }
-                return super.visitField(newAccess, fieldName, fieldDescriptor, signature, value);
-            }
-
-            @Override
-            public MethodVisitor visitMethod(
-                    int access, String methodName, String methodDescriptor, String signature, String[] exceptions) {
-                int newAccess = access;
-                if (awRulesForThisClass != null) {
-                    AccessModifier methodAwModifier =
-                            awRulesForThisClass.methodModifiers.get(methodName + methodDescriptor);
-                    if (methodAwModifier != null) {
-                        newAccess = applyMethodAccessModifier(access, methodAwModifier);
-                    }
-                }
-                return super.visitMethod(newAccess, methodName, methodDescriptor, signature, exceptions);
-            }
-        };
-
-        classReader.accept(transformingVisitor, ClassReader.EXPAND_FRAMES);
+        classReader.accept(classTweaker.createClassVisitor(Opcodes.ASM9, classWriter, null), ClassReader.EXPAND_FRAMES);
         return classWriter.toByteArray();
-    }
-
-    private int applyClassAccessModifier(int currentAccess, AccessModifier awModifier) {
-        if (awModifier == AccessModifier.ACCESSIBLE) {
-            return (currentAccess & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
-        } else if (awModifier == AccessModifier.EXTENDABLE) {
-            int acc = (currentAccess & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
-            return acc & ~Opcodes.ACC_FINAL;
-        }
-        return currentAccess;
-    }
-
-    private int applyFieldAccessModifier(int currentAccess, AccessModifier awModifier) {
-        int newAccess = currentAccess;
-        if (awModifier == AccessModifier.MUTABLE) {
-            newAccess &= ~Opcodes.ACC_FINAL;
-            newAccess = (newAccess & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
-        } else if (awModifier == AccessModifier.ACCESSIBLE) {
-            newAccess = (newAccess & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
-        }
-        return newAccess;
-    }
-
-    private int applyMethodAccessModifier(int currentAccess, AccessModifier awModifier) {
-        int newAccess = currentAccess;
-        if (awModifier == AccessModifier.ACCESSIBLE) {
-            newAccess = (newAccess & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
-        } else if (awModifier == AccessModifier.EXTENDABLE) {
-            newAccess &= ~Opcodes.ACC_FINAL;
-            if ((newAccess & Opcodes.ACC_STATIC) != 0) {
-                newAccess = (newAccess & ~(Opcodes.ACC_PRIVATE | Opcodes.ACC_PROTECTED)) | Opcodes.ACC_PUBLIC;
-            } else {
-                if ((newAccess & Opcodes.ACC_PUBLIC) == 0) {
-                    newAccess = (newAccess & ~Opcodes.ACC_PRIVATE) | Opcodes.ACC_PROTECTED;
-                }
-            }
-        }
-        return newAccess;
     }
 }

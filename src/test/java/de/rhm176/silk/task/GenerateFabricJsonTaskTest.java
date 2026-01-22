@@ -135,7 +135,7 @@ class GenerateFabricJsonTaskTest {
     @DisplayName("Comprehensive valid config generates all specified fields correctly")
     void comprehensiveValidConfig_generatesAllFields() throws IOException {
         createResourceFile("mymixin.mixins.json", "{}");
-        createResourceFile("myaw.accesswidener", "accessWidener v2 named\naccessible class com.example.Test");
+        createResourceFile("myaw.accesswidener", "classTweaker v1 official\naccessible class com.example.Test");
         createResourceFile("assets/mymod/icon.png", "dummy png content");
 
         appendTaskConfig(String.format(

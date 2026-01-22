@@ -62,7 +62,7 @@ abstract class BaseSilkPluginTest {
         // Apply the java plugin as SilkPlugin applies it
         appendBuildGradle(
                 "plugins {",
-                "    id 'de.rhm176.silk.silk-plugin'", // Your plugin's ID
+                "    id 'de.rhm176.silk.silk-plugin'",
                 "}");
 
         dummyEquilinoxJar = new File(projectDir, "EquilinoxWindows.jar");

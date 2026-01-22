@@ -261,43 +261,6 @@ class TransformClassesTaskTest {
     }
 
     @Test
-    @DisplayName("Should add specified interfaces to a target class")
-    void testAddInterfaceToClass() throws IOException {
-        String targetClassName = "com/example/TargetClass";
-        String interfaceName = "com/example/MyInterface";
-
-        Map<String, byte[]> inputJarEntries = new HashMap<>();
-        inputJarEntries.put(targetClassName + ".class", createDummyClass(targetClassName));
-        createJar(inputJarFile, inputJarEntries);
-
-        File modJsonFile = projectDir.resolve("fabric.mod.json").toFile();
-        String modJsonContent = String.format(
-                """
-            {
-              "schemaVersion": 1,
-              "id": "testmod",
-              "custom": {
-                "silk:injected_interfaces": {
-                  "%s": ["%s"]
-                }
-              }
-            }
-            """,
-                targetClassName.replace('/', '.'), interfaceName.replace('/', '.'));
-        Files.writeString(modJsonFile.toPath(), modJsonContent, StandardCharsets.UTF_8);
-
-        writeBuildGradleWithTaskConfig(inputJarFile.getName(), outputJarFile.getName(), List.of(modJsonFile.getName()));
-
-        BuildResult result = createRunner(SilkPlugin.TRANSFORM_CLASSES_TASK_NAME, "--stacktrace")
-                .build();
-        assertTaskOutcome(TaskOutcome.SUCCESS, result.task(":" + SilkPlugin.TRANSFORM_CLASSES_TASK_NAME));
-
-        assertTrue(outputJarFile.exists());
-        ClassNode cn = readClassFromJar(outputJarFile, targetClassName + ".class");
-        assertTrue(cn.interfaces.contains(interfaceName), "Class should implement " + interfaceName);
-    }
-
-    @Test
     @DisplayName("AccessWidener: Should make a private class public (accessible)")
     void testAccessWidener_makeClassAccessible() throws IOException {
         String targetClassName = "com/example/PrivateClass";
@@ -323,7 +286,7 @@ class TransformClassesTaskTest {
 
         String awContent = String.format(
                 """
-            accessWidener v2 named
+            classTweaker v1 official
             accessible class %s
             """,
                 targetClassName);
@@ -375,7 +338,7 @@ class TransformClassesTaskTest {
 
         String awContent = String.format(
                 """
-            accessWidener v2 named
+            classTweaker v1 official
             accessible field %s %s %s
             mutable field %s %s %s
             """,
@@ -421,30 +384,25 @@ class TransformClassesTaskTest {
         createJar(inputJarFile, inputJarEntries);
 
         File modJsonFile = projectDir.resolve("fabric.mod.json").toFile();
-        File awFile = projectDir.resolve("combined.accesswidener").toFile();
+        File awFile = projectDir.resolve("combined.ct").toFile();
 
         String modJsonContent = String.format(
                 """
             {
               "schemaVersion": 1,
               "id": "combinedmod",
-              "accessWidener": "combined.accesswidener",
-              "custom": {
-                "silk:injected_interfaces": {
-                  "%s": ["%s"]
-                }
-              }
+              "accessWidener": "%s"
             }
-            """,
-                targetClassName.replace('/', '.'), interfaceName.replace('/', '.'));
+            """, awFile.getName());
         Files.writeString(modJsonFile.toPath(), modJsonContent, StandardCharsets.UTF_8);
 
         String awContent = String.format(
                 """
-            accessWidener v2 named
+            classTweaker v1 official
             extendable class %s
+            inject-interface %s %s
             """,
-                targetClassName);
+                targetClassName, targetClassName, interfaceName);
         Files.writeString(awFile.toPath(), awContent, StandardCharsets.UTF_8);
 
         writeBuildGradleWithTaskConfig(inputJarFile.getName(), outputJarFile.getName(), List.of(modJsonFile.getName()));
@@ -461,47 +419,6 @@ class TransformClassesTaskTest {
         assertTrue((cn.access & Opcodes.ACC_PUBLIC) != 0, "Class should be public");
         assertFalse((cn.access & Opcodes.ACC_PRIVATE) != 0, "Class should not be private");
         assertFalse((cn.access & Opcodes.ACC_FINAL) != 0, "Class should not be final");
-    }
-
-    @Test
-    @DisplayName("Should read interface injection configuration from a fabric.mod.json inside a JAR")
-    void testModConfigInJar() throws IOException {
-        String targetClassName = "com/example/FromJarConfig";
-        String interfaceName = "com/example/InterfaceFromJarConfig";
-
-        Map<String, byte[]> inputJarEntries = new HashMap<>();
-        inputJarEntries.put(targetClassName + ".class", createDummyClass(targetClassName));
-        createJar(inputJarFile, inputJarEntries);
-
-        File modJarWithConfig = projectDir.resolve("modconfig.jar").toFile();
-        Map<String, byte[]> modJarEntries = new HashMap<>();
-        String modJsonContent = String.format(
-                """
-            {
-              "schemaVersion": 1,
-              "id": "testmodinjar",
-              "custom": {
-                "silk:injected_interfaces": {
-                  "%s": ["%s"]
-                }
-              }
-            }
-            """,
-                targetClassName.replace('/', '.'), interfaceName.replace('/', '.'));
-        modJarEntries.put("fabric.mod.json", modJsonContent.getBytes(StandardCharsets.UTF_8));
-        createJar(modJarWithConfig, modJarEntries);
-
-        writeBuildGradleWithTaskConfig(
-                inputJarFile.getName(), outputJarFile.getName(), List.of(modJarWithConfig.getName()));
-
-        BuildResult result = createRunner(SilkPlugin.TRANSFORM_CLASSES_TASK_NAME, "--stacktrace")
-                .build();
-        assertTaskOutcome(TaskOutcome.SUCCESS, result.task(":" + SilkPlugin.TRANSFORM_CLASSES_TASK_NAME));
-
-        assertTrue(outputJarFile.exists());
-        ClassNode cn = readClassFromJar(outputJarFile, targetClassName + ".class");
-        assertTrue(
-                cn.interfaces.contains(interfaceName), "Class should implement " + interfaceName + " from JAR config");
     }
 
     @Test
@@ -573,7 +490,7 @@ class TransformClassesTaskTest {
                 awFile.getName());
         Files.writeString(modJsonFile.toPath(), modJsonContent, StandardCharsets.UTF_8);
 
-        String awContent = "accessWidener v2 named";
+        String awContent = "classTweaker v1 official";
         Files.writeString(awFile.toPath(), awContent, StandardCharsets.UTF_8);
 
         writeBuildGradleWithTaskConfig(inputJarFile.getName(), outputJarFile.getName(), List.of(modJsonFile.getName()));

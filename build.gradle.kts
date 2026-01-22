@@ -19,12 +19,17 @@ gradlePlugin {
 
 repositories {
     mavenCentral()
+    maven {
+        url = uri("https://maven.fabricmc.net")
+        name = "FabricMC"
+    }
 }
 
 dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind:${project.property("jacksonVersion")}")
     implementation("org.ow2.asm:asm:${project.property("asmVersion")}")
     implementation("org.ow2.asm:asm-tree:${project.property("asmVersion")}")
+    implementation("net.fabricmc:class-tweaker:${property("classTweakerVersion")}")
 
     compileOnly("org.jetbrains:annotations:${project.property("annotationsVersion")}")
 
