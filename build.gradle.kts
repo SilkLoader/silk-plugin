@@ -107,7 +107,7 @@ publishing {
 
     publications {
         withType<MavenPublication> {
-            artifacts.removeIf { it is MavenArtifact && it.file.name.endsWith(".jar") }
+            artifacts.removeIf { it is MavenArtifact && it.classifier == null && it.extension == "jar" }
             artifact(tasks.named("shadowJar"))
         }
     }
