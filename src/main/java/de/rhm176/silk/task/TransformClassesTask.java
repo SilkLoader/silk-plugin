@@ -31,13 +31,12 @@ import java.util.jar.JarFile;
 import java.util.jar.JarInputStream;
 import java.util.jar.JarOutputStream;
 import java.util.zip.ZipEntry;
-
+import net.fabricmc.classtweaker.api.ClassTweaker;
 import net.fabricmc.classtweaker.api.ClassTweakerReader;
 import org.gradle.api.DefaultTask;
 import org.gradle.api.GradleException;
 import org.gradle.api.file.ConfigurableFileCollection;
 import org.gradle.api.file.RegularFileProperty;
-import net.fabricmc.classtweaker.api.ClassTweaker;
 import org.gradle.api.tasks.*;
 import org.objectweb.asm.*;
 
@@ -159,10 +158,7 @@ public abstract class TransformClassesTask extends DefaultTask {
                             .getName()
                             .substring(0, originalEntry.getName().length() - ".class".length());
 
-                    getLogger()
-                            .debug(
-                                    "Silk: Transforming class {}: applying CT rules.",
-                                    classNameInternal);
+                    getLogger().debug("Silk: Transforming class {}: applying CT rules.", classNameInternal);
                     entryBytes = transformClassBytecode(entryBytes);
                 }
                 jos.write(entryBytes);
@@ -180,10 +176,7 @@ public abstract class TransformClassesTask extends DefaultTask {
      * @param fmjSourceDescription Description of where this fmjStream comes from (for logging).
      * @param containingJar Optional JarFile if the fmjStream comes from within a JAR, used to resolve AW paths.
      */
-    private void processFabricModJsonStream(
-            InputStream fmjStream,
-            String fmjSourceDescription,
-            JarFile containingJar)
+    private void processFabricModJsonStream(InputStream fmjStream, String fmjSourceDescription, JarFile containingJar)
             throws IOException {
         JsonNode awPathNode = OBJECT_MAPPER.readTree(fmjStream).path("accessWidener");
         if (awPathNode.isTextual()) {

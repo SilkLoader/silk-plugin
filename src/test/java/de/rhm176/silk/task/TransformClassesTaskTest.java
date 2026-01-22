@@ -393,7 +393,8 @@ class TransformClassesTaskTest {
               "id": "combinedmod",
               "accessWidener": "%s"
             }
-            """, awFile.getName());
+            """,
+                awFile.getName());
         Files.writeString(modJsonFile.toPath(), modJsonContent, StandardCharsets.UTF_8);
 
         String awContent = String.format(

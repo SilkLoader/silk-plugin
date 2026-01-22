@@ -60,10 +60,7 @@ abstract class BaseSilkPluginTest {
         mainResourcesDir.mkdirs();
 
         // Apply the java plugin as SilkPlugin applies it
-        appendBuildGradle(
-                "plugins {",
-                "    id 'de.rhm176.silk.silk-plugin'",
-                "}");
+        appendBuildGradle("plugins {", "    id 'de.rhm176.silk.silk-plugin'", "}");
 
         dummyEquilinoxJar = new File(projectDir, "EquilinoxWindows.jar");
         createDummyJar(dummyEquilinoxJar.toPath(), null, "dummy.game.MainGameClass");
