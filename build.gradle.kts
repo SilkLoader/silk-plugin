@@ -1,8 +1,11 @@
+import com.github.jengelman.gradle.plugins.shadow.tasks.ShadowJar
+
 plugins {
     id("java")
     id("java-gradle-plugin")
     id("maven-publish")
     id("com.diffplug.spotless") version "7.0.3"
+    id("com.gradleup.shadow") version "9.3.1"
 }
 
 version = findProperty("version")!!
@@ -25,11 +28,19 @@ repositories {
     }
 }
 
+val shadowBundle: Configuration by configurations.creating {
+    isCanBeResolved = true
+    isCanBeConsumed = false
+}
+
 dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind:${project.property("jacksonVersion")}")
     implementation("org.ow2.asm:asm:${project.property("asmVersion")}")
     implementation("org.ow2.asm:asm-tree:${project.property("asmVersion")}")
-    implementation("net.fabricmc:class-tweaker:${property("classTweakerVersion")}")
+    "net.fabricmc:class-tweaker:${property("classTweakerVersion")}".let {
+        implementation(it)
+        shadowBundle(it)
+    }
 
     compileOnly("org.jetbrains:annotations:${project.property("annotationsVersion")}")
 
@@ -45,6 +56,13 @@ dependencies {
     testImplementation("org.mockito:mockito-core:${project.property("mockitoVersion")}")
     testImplementation("org.mockito:mockito-junit-jupiter:${project.property("mockitoVersion")}")
 }
+
+tasks.named<ShadowJar>("shadowJar") {
+    archiveClassifier.set("")
+    configurations = listOf(shadowBundle)
+    mergeServiceFiles()
+}
+
 
 tasks.test {
     useJUnitPlatform()
@@ -84,6 +102,12 @@ publishing {
                     create<BasicAuthentication>("basic")
                 }
             }
+        }
+    }
+
+    publications {
+        withType<MavenPublication> {
+            artifact(tasks.named("shadowJar"))
         }
     }
 }
