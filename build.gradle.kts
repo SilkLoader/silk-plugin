@@ -38,7 +38,7 @@ dependencies {
     implementation("org.ow2.asm:asm:${project.property("asmVersion")}")
     implementation("org.ow2.asm:asm-tree:${project.property("asmVersion")}")
     "net.fabricmc:class-tweaker:${property("classTweakerVersion")}".let {
-        implementation(it)
+        compileOnly(it)
         shadowBundle(it)
     }
 
