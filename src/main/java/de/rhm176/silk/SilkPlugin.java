@@ -34,6 +34,8 @@ import java.util.stream.Collectors;
 import org.gradle.api.*;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.Dependency;
+import org.gradle.api.artifacts.ProjectDependency;
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.api.artifacts.repositories.ArtifactRepository;
 import org.gradle.api.artifacts.repositories.MavenArtifactRepository;
 import org.gradle.api.artifacts.result.ResolvedArtifactResult;
@@ -330,14 +332,21 @@ public class SilkPlugin implements Plugin<Project> {
                             });
                         }
 
-                        Provider<Set<File>> dependencyJarsProvider = compileClasspath
-                                .getIncoming()
-                                .getArtifacts()
-                                .getResolvedArtifacts()
-                                .map(resolvedArtifactSet -> resolvedArtifactSet.stream()
-                                        .map(ResolvedArtifactResult::getFile)
-                                        .filter(file -> file.getName().endsWith(".jar") && file.isFile())
-                                        .collect(Collectors.toSet()));
+                        Provider<Set<File>> dependencyJarsProvider =
+                                compileClasspath.getIncoming()
+                                        .getArtifacts()
+                                        .getResolvedArtifacts()
+                                        .map(artifactResults ->
+                                                artifactResults.stream()
+                                                        .filter(artifact ->
+                                                                artifact.getId().getComponentIdentifier()
+                                                                        instanceof ModuleComponentIdentifier
+                                                        )
+                                                        .map(ResolvedArtifactResult::getFile)
+                                                        .filter(file -> file.isFile() && file.getName().endsWith(".jar"))
+                                                        .collect(Collectors.toSet())
+                                        );
+
                         task.getModConfigurationSources().from(dependencyJarsProvider);
 
                         Provider<RegularFile> gameJarProvider = extension.getGameJar();
