@@ -102,6 +102,7 @@ publishing {
 
     publications {
         withType<MavenPublication> {
+            artifacts.removeAll { it.classifier == null && it.extension == "jar" }
             artifact(tasks.shadowJar)
         }
     }
