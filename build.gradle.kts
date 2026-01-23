@@ -119,7 +119,10 @@ spotless {
 }
 
 tasks.named<PluginUnderTestMetadata>("pluginUnderTestMetadata") {
-    pluginClasspath.setFrom(tasks.shadowJar, sourceSets.main.get().runtimeClasspath)
+    dependsOn(tasks.jar)
+
+    pluginClasspath.setFrom(tasks.shadowJar)
+    pluginClasspath.from(configurations.runtimeClasspath)
 }
 
 tasks.test {
