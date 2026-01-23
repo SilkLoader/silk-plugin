@@ -102,7 +102,9 @@ publishing {
 
     publications {
         withType<MavenPublication> {
-            artifact(tasks.shadowJar)
+            artifact(tasks.shadowJar) {
+                classifier = null
+            }
         }
     }
 }
@@ -116,6 +118,10 @@ spotless {
 
         palantirJavaFormat("2.66.0")
     }
+}
+
+tasks.jar {
+    enabled = false
 }
 
 tasks.named<PluginUnderTestMetadata>("pluginUnderTestMetadata") {
