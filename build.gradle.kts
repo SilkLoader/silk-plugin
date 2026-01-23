@@ -32,13 +32,16 @@ val shadowBundle: Configuration by configurations.creating {
     isCanBeResolved = true
     isCanBeConsumed = false
 }
+val mockitoAgent: Configuration by configurations.creating {
+    isTransitive = false
+}
 
 dependencies {
     implementation("com.fasterxml.jackson.core:jackson-databind:${project.property("jacksonVersion")}")
     implementation("org.ow2.asm:asm:${project.property("asmVersion")}")
     implementation("org.ow2.asm:asm-tree:${project.property("asmVersion")}")
     "net.fabricmc:class-tweaker:${property("classTweakerVersion")}".let {
-        implementation(it)
+        compileOnly(it)
         shadowBundle(it)
     }
 
@@ -53,21 +56,11 @@ dependencies {
     testImplementation("org.junit.jupiter:junit-jupiter")
     testRuntimeOnly("org.junit.platform:junit-platform-launcher")
 
-    testImplementation("org.mockito:mockito-core:${project.property("mockitoVersion")}")
+    "org.mockito:mockito-core:${project.property("mockitoVersion")}".let {
+        testImplementation(it)
+        mockitoAgent(it)
+    }
     testImplementation("org.mockito:mockito-junit-jupiter:${project.property("mockitoVersion")}")
-}
-
-tasks.named<ShadowJar>("shadowJar") {
-    archiveClassifier.set("")
-    configurations = listOf(shadowBundle)
-    mergeServiceFiles()
-
-    relocate("net.fabricmc.classtweaker", "de.rhm176.silk.shadow.classtweaker")
-}
-
-
-tasks.test {
-    useJUnitPlatform()
 }
 
 java {
@@ -109,22 +102,9 @@ publishing {
 
     publications {
         withType<MavenPublication> {
-            artifact(tasks.named("shadowJar"))
-
-            pom.withXml {
-                val dependenciesNode = asNode().get("dependencies") as? groovy.util.Node
-                dependenciesNode?.children()?.removeIf {
-                    val dependency = it as groovy.util.Node
-                    val artifactId = dependency.get("artifactId") as String
-                    artifactId == "class-tweaker"
-                }
-            }
+            artifact(tasks.shadowJar)
         }
     }
-}
-
-tasks.jar {
-    enabled = false
 }
 
 spotless {
@@ -136,4 +116,24 @@ spotless {
 
         palantirJavaFormat("2.66.0")
     }
+}
+
+tasks.named<PluginUnderTestMetadata>("pluginUnderTestMetadata") {
+    pluginClasspath.setFrom(tasks.shadowJar, sourceSets.main.get().runtimeClasspath)
+}
+
+tasks.test {
+    dependsOn(tasks.shadowJar)
+
+    jvmArgs("-javaagent:${mockitoAgent.singleFile}")
+
+    useJUnitPlatform()
+}
+
+tasks.shadowJar {
+    archiveClassifier.set("")
+    configurations = listOf(shadowBundle)
+    mergeServiceFiles()
+
+    relocate("net.fabricmc.classtweaker", "de.rhm176.silk.shadow.classtweaker")
 }
