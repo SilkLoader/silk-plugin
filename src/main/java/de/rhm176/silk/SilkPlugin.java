@@ -39,6 +39,7 @@ import org.gradle.api.artifacts.repositories.ArtifactRepository;
 import org.gradle.api.artifacts.repositories.MavenArtifactRepository;
 import org.gradle.api.artifacts.result.ResolvedArtifactResult;
 import org.gradle.api.file.*;
+import org.gradle.api.plugins.BasePluginExtension;
 import org.gradle.api.plugins.JavaPlugin;
 import org.gradle.api.plugins.JavaPluginExtension;
 import org.gradle.api.provider.Provider;
@@ -93,7 +94,6 @@ public class SilkPlugin implements Plugin<Project> {
         Configuration equilinoxConfiguration = project.getConfigurations()
                 .create(EQUILINOX_CONFIGURATION_NAME, config -> {
                     config.setDescription("The game JAR for Silk, e.g., EquilinoxWindows.jar.");
-                    config.setVisible(true);
                     config.setCanBeConsumed(false);
                     config.setCanBeResolved(true);
                     config.setTransitive(false);
@@ -265,20 +265,16 @@ public class SilkPlugin implements Plugin<Project> {
                     Provider<List<String>> bundledJarNamesProvider =
                             project.provider(() -> extension.getRegisteredSubprojectsInternal().stream()
                                     .map(subProject -> {
-                                        try {
-                                            return subProject
-                                                    .getTasks()
-                                                    .named("jar", Jar.class)
-                                                    .flatMap(Jar::getArchiveFileName)
-                                                    .getOrNull();
-                                        } catch (UnknownTaskException e) {
-                                            project.getLogger()
-                                                    .warn(
-                                                            "Silk: Subproject '{}' does not have a 'jar' task of type Jar. "
-                                                                    + "Cannot determine its archive name for fabric.mod.json.",
-                                                            subProject.getPath());
+                                        if (!subProject.getPlugins().hasPlugin("java")) {
                                             return null;
                                         }
+
+                                        return subProject
+                                                        .getExtensions()
+                                                        .getByType(BasePluginExtension.class)
+                                                        .getArchivesName()
+                                                        .get()
+                                                + "-" + subProject.getVersion() + ".jar";
                                     })
                                     .filter(Objects::nonNull)
                                     .collect(Collectors.toList()));
@@ -366,7 +362,6 @@ public class SilkPlugin implements Plugin<Project> {
 
         Configuration vineflowerClasspath = project.getConfigurations().create("vineflowerTool", config -> {
             config.setDescription("Classpath for Vineflower decompiler tool.");
-            config.setVisible(false);
             config.setCanBeConsumed(false);
             config.setCanBeResolved(true);
             config.setTransitive(true);
